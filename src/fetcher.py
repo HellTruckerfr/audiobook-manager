@@ -32,11 +32,18 @@ def _fetch_raw(asin: str, region: str) -> str | None:
         return None
 
 
+_AUDIBLE_FOOTER = re.compile(
+    r">>?\s*Ce livre audio[^.]*disponible en téléchargement\.?",
+    re.IGNORECASE,
+)
+
+
 def _extract_description(html: str) -> str | None:
     m = re.search(r'class="a-expander-content[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
     if m:
         text = re.sub(r"<[^>]+>", "", m.group(1))
         text = re.sub(r"\s+", " ", text).strip()
+        text = _AUDIBLE_FOOTER.sub("", text).strip()
         if len(text) > 30:
             return text
     return None
