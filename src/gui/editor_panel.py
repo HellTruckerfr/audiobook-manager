@@ -179,7 +179,7 @@ class EditorPanel(QWidget):
         row.addStretch()
         outer.addLayout(row)
 
-        self._watermark_cb = QCheckBox("Watermark HellTrucker sur la cover")
+        self._watermark_cb = QCheckBox("Watermark sur la cover")
         outer.addWidget(self._watermark_cb)
 
         self._ignore_meta_cb = QCheckBox(
