@@ -68,7 +68,10 @@ def _write_ffmeta(path: str, config, chapters: List[Chapter]):
         lines.append(f"ASIN={config.asin}\n")
     if config.encoded_by:
         lines.append(f"encoded_by={config.encoded_by}\n")
-        lines.append(f"copyright=By {config.encoded_by}\n")
+    if config.copyright:
+        lines.append(f"copyright={config.copyright}\n")
+    if config.description:
+        lines.append(f"comment={config.description}\n")
 
     lang = (config.language or "FR").upper()
     cum_ms = 0
@@ -82,6 +85,43 @@ def _write_ffmeta(path: str, config, chapters: List[Chapter]):
         cum_ms += dur_ms
 
     with open(path, "w", encoding=utf8, newline="\n") as f:
+        f.writelines(lines)
+
+
+def _write_ffmeta_tags(path: str, config) -> None:
+    """Tags globaux uniquement (pas de chapitres) — pour update_metadata."""
+    lines = [";FFMETADATA1\n"]
+    lines.append(f"title={config.title}\n")
+    if config.series and config.volume:
+        album = f"{config.series} - T{_vol_number(config.volume):02d} - {config.title}"
+    elif config.series:
+        album = f"{config.series} - {config.title}"
+    else:
+        album = config.title
+    lines.append(f"album={album}\n")
+    lines.append(f"artist={config.author}\n")
+    narrator = config.narrator or config.author
+    lines.append(f"album_artist={narrator}\n")
+    if config.narrator:
+        lines.append(f"performer={config.narrator}\n")
+    if config.series:
+        lines.append(f"grouping={config.series}\n")
+    if config.volume:
+        lines.append(f"track={_vol_number(config.volume)}\n")
+    lines.append(f"genre={config.genre}\n")
+    if config.year:
+        lines.append(f"date={config.year}\n")
+    if config.publisher:
+        lines.append(f"publisher={config.publisher}\n")
+    if config.asin:
+        lines.append(f"ASIN={config.asin}\n")
+    if config.encoded_by:
+        lines.append(f"encoded_by={config.encoded_by}\n")
+    if config.copyright:
+        lines.append(f"copyright={config.copyright}\n")
+    if config.description:
+        lines.append(f"comment={config.description}\n")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.writelines(lines)
 
 
@@ -204,6 +244,76 @@ class Converter:
             args=(book, output_path, progress_cb, done_cb, log_cb),
             daemon=True,
         ).start()
+
+    def update_metadata(self, book, progress_cb, done_cb, log_cb=None):
+        """Réécrit les tags d'un M4B existant sans ré-encodage audio."""
+        threading.Thread(
+            target=self._run_update_metadata,
+            args=(book, progress_cb, done_cb, log_cb),
+            daemon=True,
+        ).start()
+
+    def _run_update_metadata(self, book, progress_cb, done_cb, log_cb=None):
+        import tempfile, shutil
+
+        def log(msg, level="info"):
+            if log_cb:
+                log_cb(msg, level)
+
+        m4b_path = book.output_m4b_path
+        if not m4b_path or not os.path.isfile(m4b_path):
+            done_cb(False, "Fichier M4B introuvable")
+            return
+
+        log(f"🏷  Tags : {book.display_title}", "start")
+        progress_cb(0.1, "Écriture des tags…")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            meta_path = os.path.join(tmp, "meta.txt")
+            tmp_out   = os.path.join(tmp, "output.m4b")
+
+            _write_ffmeta_tags(meta_path, book.config)
+
+            # Chapitres et audio conservés depuis le M4B original ; tags remplacés
+            args = [
+                "ffmpeg", "-loglevel", "error",
+                "-i", self._p(m4b_path),
+                "-i", self._p(meta_path),
+                "-map_metadata", "1",
+                "-map_chapters", "0",
+                "-c", "copy",
+                "-y", self._p(tmp_out),
+            ]
+
+            progress_cb(0.5, "Application des tags…")
+            try:
+                r = subprocess.run(
+                    args, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
+                    timeout=300, creationflags=_BELOW_NORMAL,
+                )
+            except subprocess.TimeoutExpired:
+                log("✗  Timeout", "error")
+                done_cb(False, "Timeout")
+                return
+
+            if r.returncode != 0 or not os.path.isfile(tmp_out) or os.path.getsize(tmp_out) < 1024:
+                err = " | ".join(l for l in (r.stderr or "").splitlines() if l.strip())[:200]
+                log(f"✗  {err or 'Erreur ffmpeg'}", "error")
+                done_cb(False, err or "Erreur ffmpeg")
+                return
+
+            progress_cb(0.9, "Remplacement du fichier…")
+            try:
+                shutil.move(tmp_out, m4b_path)
+            except Exception as e:
+                log(f"✗  Remplacement impossible : {e}", "error")
+                done_cb(False, str(e))
+                return
+
+        log("✓  Tags mis à jour", "ok")
+        progress_cb(1.0, "Terminé")
+        done_cb(True, m4b_path)
 
     def convert_to_mp3(
         self,

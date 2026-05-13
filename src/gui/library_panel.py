@@ -502,6 +502,10 @@ class LibraryPanel(QWidget):
                 lambda: [self.app.convert_now(b) for b in books])
             menu.addAction(f"🎵  Exporter {n} livres en MP3").triggered.connect(
                 lambda: [self.app.add_mp3_export(b) for b in books])
+            meta_with_m4b = [b for b in books if b.output_m4b_path]
+            if meta_with_m4b:
+                menu.addAction(f"🏷  Mettre à jour les tags M4B ({len(meta_with_m4b)} livres)").triggered.connect(
+                    lambda checked=False, bl=meta_with_m4b: [self.app.update_book_metadata(b) for b in bl])
             menu.addSeparator()
             menu.addAction(f"Marquer {n} livres comme fait ✓").triggered.connect(
                 lambda: [self.update_status(b.id, "done") for b in books])
@@ -532,6 +536,9 @@ class LibraryPanel(QWidget):
                 lambda: self.app.convert_now(book))
             menu.addAction("🎵  Exporter en MP3").triggered.connect(
                 lambda: self.app.add_mp3_export(book))
+            if book.output_m4b_path:
+                menu.addAction("🏷  Mettre à jour les tags M4B").triggered.connect(
+                    lambda checked=False, b=book: self.app.update_book_metadata(b))
             menu.addSeparator()
             label_meta = ("☐  Méta : revérifier (annuler « ignorer »)"
                           if book.config.ignore_metadata_check

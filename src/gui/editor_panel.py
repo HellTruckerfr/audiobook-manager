@@ -8,8 +8,9 @@ from PyQt6.QtWidgets import (
     QTabWidget, QLabel, QLineEdit, QComboBox, QCheckBox, QCompleter,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFrame, QMenu,
+    QTextEdit,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QPixmap, QColor
 
 from ..models import BookEntry, BookConfig, Chapter, AudioInfo
@@ -17,6 +18,26 @@ from .tag_import_dialog import TagImportDialog
 
 
 _COMBO_FIELDS = ("author", "series", "volume", "narrator", "year", "language", "publisher")
+
+
+class _FetchThread(QThread):
+    """Récupère description + copyright depuis Amazon en arrière-plan."""
+    success = pyqtSignal(str, str)   # (description, copyright)
+    failed  = pyqtSignal()
+
+    def __init__(self, asin: str):
+        super().__init__()
+        self._asin = asin
+
+    def run(self):
+        from ..fetcher import fetch_amazon_meta
+        result = fetch_amazon_meta(self._asin)
+        desc = result.get("description") or ""
+        copy = result.get("copyright") or ""
+        if desc or copy:
+            self.success.emit(desc, copy)
+        else:
+            self.failed.emit()
 
 
 class _AutoCombo(QComboBox):
@@ -178,6 +199,28 @@ class EditorPanel(QWidget):
         row.addWidget(self._sr_cb)
         row.addStretch()
         outer.addLayout(row)
+
+        # Description (résumé)
+        desc_header = QHBoxLayout()
+        desc_header.addWidget(QLabel("Description :"))
+        self._fetch_btn = QPushButton("📥 Fetch Amazon")
+        self._fetch_btn.setFixedHeight(22)
+        self._fetch_btn.clicked.connect(self._fetch_from_amazon)
+        desc_header.addStretch()
+        desc_header.addWidget(self._fetch_btn)
+        outer.addLayout(desc_header)
+        self._desc_edit = QTextEdit()
+        self._desc_edit.setMaximumHeight(90)
+        self._desc_edit.setPlaceholderText("Résumé du livre…")
+        outer.addWidget(self._desc_edit)
+
+        # Copyright
+        copy_row = QHBoxLayout()
+        copy_row.addWidget(QLabel("Copyright :"))
+        self._copyright_le = QLineEdit()
+        self._copyright_le.setPlaceholderText("© 2020 Audible Studios")
+        copy_row.addWidget(self._copyright_le)
+        outer.addLayout(copy_row)
 
         self._watermark_cb = QCheckBox("Watermark sur la cover")
         outer.addWidget(self._watermark_cb)
@@ -350,6 +393,8 @@ class EditorPanel(QWidget):
         self._sr_cb.setCurrentText(cfg.sample_rate)
         self._watermark_cb.setChecked(cfg.watermark)
         self._ignore_meta_cb.setChecked(cfg.ignore_metadata_check)
+        self._desc_edit.setPlainText(cfg.description)
+        self._copyright_le.setText(cfg.copyright)
         self._cover_path_lbl.setText(cfg.cover_path)
         self._tag_status.setText("")
 
@@ -666,9 +711,34 @@ class EditorPanel(QWidget):
         cfg.sample_rate = self._sr_cb.currentText()
         cfg.watermark   = self._watermark_cb.isChecked()
         cfg.ignore_metadata_check = self._ignore_meta_cb.isChecked()
+        cfg.description = self._desc_edit.toPlainText().strip()
+        cfg.copyright   = self._copyright_le.text().strip()
         src = self._get_source()
         if src:
             cfg.selected_source_label = src.folder_label
+
+    def _fetch_from_amazon(self):
+        asin = self._vars["asin"].text().strip()
+        if not asin:
+            return
+        self._fetch_btn.setEnabled(False)
+        self._fetch_btn.setText("…")
+        self._fetch_thread = _FetchThread(asin)
+        self._fetch_thread.success.connect(self._on_fetch_success)
+        self._fetch_thread.failed.connect(self._on_fetch_failed)
+        self._fetch_thread.start()
+
+    def _on_fetch_success(self, description: str, copyright_val: str):
+        if description:
+            self._desc_edit.setPlainText(description)
+        if copyright_val:
+            self._copyright_le.setText(copyright_val)
+        self._fetch_btn.setEnabled(True)
+        self._fetch_btn.setText("📥 Fetch Amazon")
+
+    def _on_fetch_failed(self):
+        self._fetch_btn.setEnabled(True)
+        self._fetch_btn.setText("📥 Fetch Amazon")
 
     def _save_config(self):
         if not self._book:

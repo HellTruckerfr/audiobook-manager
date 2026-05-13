@@ -118,6 +118,8 @@ class BookConfig:
     sample_rate: str = "44100"
     watermark: bool = True
     cover_path: str = ""
+    description: str = ""
+    copyright: str = ""
     selected_source_label: str = ""
     ignore_metadata_check: bool = False
     chapter_custom_titles: Dict[int, str] = field(default_factory=dict)
@@ -139,6 +141,8 @@ class BookConfig:
             "sample_rate": self.sample_rate,
             "watermark": self.watermark,
             "cover_path": self.cover_path,
+            "description": self.description,
+            "copyright": self.copyright,
             "selected_source_label": self.selected_source_label,
             "ignore_metadata_check": self.ignore_metadata_check,
             "chapter_custom_titles": {str(k): v for k, v in self.chapter_custom_titles.items()},
@@ -163,6 +167,8 @@ class BookConfig:
             sample_rate=d.get("sample_rate", "44100"),
             watermark=d.get("watermark", False),
             cover_path=d.get("cover_path", ""),
+            description=d.get("description", ""),
+            copyright=d.get("copyright", ""),
             selected_source_label=d.get("selected_source_label", ""),
             ignore_metadata_check=d.get("ignore_metadata_check", False),
             chapter_custom_titles=titles,

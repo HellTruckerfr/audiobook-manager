@@ -497,5 +497,10 @@ class AudiobookManagerApp:
         self.queue_panel.add_job(book, job_type="mp3")
         self._show_page("queue")
 
+    def update_book_metadata(self, book: BookEntry):
+        """Ajoute un job de mise à jour des tags M4B à la file."""
+        self.queue_panel.add_job(book, job_type="meta")
+        self._show_page("queue")
+
     def run(self):
         sys.exit(self._qt_app.exec())

@@ -293,7 +293,14 @@ class QueuePanel(QWidget):
         if console:
             bridge.log.connect(console.log)
 
-        if job.job_type == "mp3":
+        if job.job_type == "meta":
+            self.app.converter.update_metadata(
+                job.book,
+                progress_cb=bridge.progress.emit,
+                done_cb=bridge.done.emit,
+                log_cb=bridge.log.emit,
+            )
+        elif job.job_type == "mp3":
             from ..converter import build_mp3_output_dir
             out_dir = cfg.output_mp3 or os.path.join(
                 os.path.expanduser("~"), "audiobooks", "mp3")
@@ -624,6 +631,8 @@ class QueuePanel(QWidget):
                     display = job.book.display_title
                     if job.job_type == "mp3":
                         display += "  [MP3]"
+                    elif job.job_type == "meta":
+                        display += "  [Méta]"
                     it.setText(display)
                 if col == COL_INFO and text:
                     it.setToolTip(text)
