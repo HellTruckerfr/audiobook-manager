@@ -1,0 +1,26 @@
+# Personal data — not committed
+library.json
+library.json.bak*
+last_library.json
+last_library.json.bak*
+config.json
+scan_cache.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PyInstaller build
+build/
+dist/
+*.spec.bak
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+Thumbs.db
+.DS_Store
