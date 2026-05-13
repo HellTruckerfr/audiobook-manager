@@ -13,54 +13,56 @@ _HEADERS = {
 }
 
 
-def fetch_amazon_description(asin: str, region: str = "fr") -> str | None:
-    """Récupère le résumé d'un livre depuis Amazon via son ASIN.
+def _decode(raw: bytes) -> str:
+    """Amazon.fr déclare UTF-8 mais sert souvent du latin-1/windows-1252.
+    On essaie UTF-8 strict en premier, on bascule sur windows-1252 sinon."""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("windows-1252", errors="replace")
 
-    Retourne le texte brut ou None si introuvable / erreur réseau.
-    """
+
+def _fetch_raw(asin: str, region: str) -> str | None:
     url = f"https://www.amazon.{region}/dp/{asin}"
     req = urllib.request.Request(url, headers=_HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+            return _decode(resp.read())
     except (urllib.error.URLError, OSError):
         return None
 
-    # Description dans le bloc « a-expander-content » (synopsis produit)
+
+def _extract_description(html: str) -> str | None:
     m = re.search(r'class="a-expander-content[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
     if m:
         text = re.sub(r"<[^>]+>", "", m.group(1))
         text = re.sub(r"\s+", " ", text).strip()
         if len(text) > 30:
             return text
-
     return None
 
 
-def fetch_amazon_copyright(asin: str, region: str = "fr") -> str | None:
-    """Récupère le copyright d'un livre depuis Amazon (éditeur + année).
-
-    Retourne une chaîne comme '© 2020 Audible Studios' ou None.
-    """
-    url = f"https://www.amazon.{region}/dp/{asin}"
-    req = urllib.request.Request(url, headers=_HEADERS)
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError):
-        return None
-
-    # Chercher la ligne « Copyright » dans les détails du produit
-    m = re.search(
-        r"Copyright[^<]*</[^>]+>[^<]*<[^>]+>([^<]{5,120})</",
-        html, re.IGNORECASE
-    )
+def _extract_copyright(html: str) -> str | None:
+    # Structure Amazon : <... copyright" class="a-section ...">©2016 Albin Michel...</div>
+    m = re.search(r'copyright"[^>]*class="[^"]*"[^>]*>([^<]{5,150})', html)
+    if not m:
+        # Fallback : balise <div id="..."> précédée de copyright
+        m = re.search(r'copyright["\s][^>]*>([©(P)\d][^<]{4,120})', html, re.IGNORECASE)
     if m:
         val = m.group(1).strip()
         if val:
             return val
-
     return None
+
+
+def fetch_amazon_description(asin: str, region: str = "fr") -> str | None:
+    html = _fetch_raw(asin, region)
+    return _extract_description(html) if html else None
+
+
+def fetch_amazon_copyright(asin: str, region: str = "fr") -> str | None:
+    html = _fetch_raw(asin, region)
+    return _extract_copyright(html) if html else None
 
 
 def fetch_amazon_meta(asin: str, region: str = "fr") -> dict:
@@ -68,32 +70,10 @@ def fetch_amazon_meta(asin: str, region: str = "fr") -> dict:
 
     Retourne {'description': str|None, 'copyright': str|None}.
     """
-    url = f"https://www.amazon.{region}/dp/{asin}"
-    req = urllib.request.Request(url, headers=_HEADERS)
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError):
+    html = _fetch_raw(asin, region)
+    if not html:
         return {"description": None, "copyright": None}
-
-    # Description
-    description = None
-    m = re.search(r'class="a-expander-content[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL)
-    if m:
-        text = re.sub(r"<[^>]+>", "", m.group(1))
-        text = re.sub(r"\s+", " ", text).strip()
-        if len(text) > 30:
-            description = text
-
-    # Copyright
-    copyright_val = None
-    mc = re.search(
-        r"Copyright[^<]*</[^>]+>[^<]*<[^>]+>([^<]{5,120})</",
-        html, re.IGNORECASE,
-    )
-    if mc:
-        val = mc.group(1).strip()
-        if val:
-            copyright_val = val
-
-    return {"description": description, "copyright": copyright_val}
+    return {
+        "description": _extract_description(html),
+        "copyright":   _extract_copyright(html),
+    }
