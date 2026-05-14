@@ -21,7 +21,7 @@ def _size_display(info: AudioInfo) -> str:
     return f"{info.size_mb / 1024:.2f} GiB"
 
 
-def _title_line(cfg) -> str:
+def _title_line(cfg, fmt_label: str = "M4B") -> str:
     author = cfg.author or "?"
     if cfg.series:
         bracket = f"[{cfg.volume}]" if cfg.volume else "[Intégrale]"
@@ -29,19 +29,24 @@ def _title_line(cfg) -> str:
     else:
         title_part = cfg.title or "?"
     year_str = f" ({cfg.year})" if cfg.year else ""
-    return f"{author} - {title_part} - M4B{year_str}"
+    return f"{author} - {title_part} - {fmt_label}{year_str}"
 
 
 def generate_prez(book: BookEntry, tracker_name: str = "La Cale",
-                  rating: str = "") -> str:
+                  rating: str = "", fmt: str = "m4b") -> str:
     cfg = book.config
+    fmt_label = "M4B" if fmt == "m4b" else "MP3"
+    info: AudioInfo | None = (
+        book.output_m4b_info if fmt == "m4b" else book.output_mp3_info
+    )
+
     lines = ["[center]"]
 
     if cfg.cover_url:
         lines += [f"[img]{cfg.cover_url}[/img]", ""]
 
     lines += [
-        f"[size=6][color=#eab308][b]{_title_line(cfg)}[/b][/color][/size]",
+        f"[size=6][color=#eab308][b]{_title_line(cfg, fmt_label)}[/b][/color][/size]",
         "",
     ]
 
@@ -62,9 +67,8 @@ def generate_prez(book: BookEntry, tracker_name: str = "La Cale",
     if cfg.publisher:
         lines.append(f"[b]Éditeur :[/b] {cfg.publisher}")
     lines.append("[b]Format :[/b] Audiobook")
-    lines.append("[b]Format du conteneur :[/b] M4B")
+    lines.append(f"[b]Format du conteneur :[/b] {fmt_label}")
 
-    info: AudioInfo | None = book.output_m4b_info
     if info:
         lines.append(f"[b]Codec audio :[/b] {_codec_display(info.codec)}")
         lines.append(f"[b]Bitrate :[/b] {_bitrate_display(info)}")
@@ -86,7 +90,6 @@ blockquote {
     background: #252525; border-left: 3px solid #555;
     padding: 10px 16px; margin: 8px 0; color: #bbb; font-style: italic;
 }
-b { color: #f3f3f3; }
 img { border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.6);
       max-width: 220px; max-height: 320px; }
 """
