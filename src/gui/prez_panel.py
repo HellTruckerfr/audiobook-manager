@@ -18,17 +18,45 @@ class _UploadThread(QThread):
     done   = pyqtSignal(str)   # URL on success
     failed = pyqtSignal(str)   # error message
 
+    MAX_DIM = 500
+
     def __init__(self, file_path: str):
         super().__init__()
         self._path = file_path
 
     def run(self):
+        import tempfile
+        from PyQt6.QtGui import QImage
+        from PyQt6.QtCore import Qt as _Qt
         from ..uploader import upload_to_catbox
+
+        tmp_path = None
         try:
-            url = upload_to_catbox(self._path)
+            upload_path = self._path
+            img = QImage(self._path)
+            if (not img.isNull()
+                    and (img.width() > self.MAX_DIM or img.height() > self.MAX_DIM)):
+                img = img.scaled(
+                    self.MAX_DIM, self.MAX_DIM,
+                    _Qt.AspectRatioMode.KeepAspectRatio,
+                    _Qt.TransformationMode.SmoothTransformation,
+                )
+                suffix = os.path.splitext(self._path)[1] or ".jpg"
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+                    tmp_path = f.name
+                img.save(tmp_path)
+                upload_path = tmp_path
+
+            url = upload_to_catbox(upload_path)
             self.done.emit(url)
         except Exception as e:
             self.failed.emit(str(e))
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
 
 class _PreviewBrowser(QTextBrowser):
