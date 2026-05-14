@@ -8,6 +8,7 @@ last_library.json
 last_library.json.bak*
 config.json
 scan_cache.json
+backups/
 
 # Python
 __pycache__/
