@@ -78,15 +78,23 @@ def fetch_amazon_copyright(asin: str, region: str = "fr") -> str | None:
     return _extract_copyright(html) if html else None
 
 
-def fetch_amazon_meta(asin: str, region: str = "fr") -> dict:
-    """Récupère description ET copyright en une seule requête HTTP.
+def _extract_cover_url(html: str) -> str | None:
+    m = re.search(
+        r'(https://m\.media-amazon\.com/images/I/([A-Za-z0-9+%.]+)\._SL\d+_\.jpg)',
+        html,
+    )
+    if m:
+        return f"https://m.media-amazon.com/images/I/{m.group(2)}._SL500_.jpg"
+    return None
 
-    Retourne {'description': str|None, 'copyright': str|None}.
-    """
+
+def fetch_amazon_meta(asin: str, region: str = "fr") -> dict:
+    """Récupère description, copyright et cover_url en une seule requête HTTP."""
     html = _fetch_raw(asin, region)
     if not html:
-        return {"description": None, "copyright": None}
+        return {"description": None, "copyright": None, "cover_url": None}
     return {
         "description": _extract_description(html),
         "copyright":   _extract_copyright(html),
+        "cover_url":   _extract_cover_url(html),
     }

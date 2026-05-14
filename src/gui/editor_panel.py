@@ -21,8 +21,8 @@ _COMBO_FIELDS = ("author", "series", "volume", "narrator", "year", "language", "
 
 
 class _FetchThread(QThread):
-    """Récupère description + copyright depuis Amazon en arrière-plan."""
-    success = pyqtSignal(str, str)   # (description, copyright)
+    """Récupère description, copyright et cover_url depuis Amazon en arrière-plan."""
+    success = pyqtSignal(str, str, str)   # (description, copyright, cover_url)
     failed  = pyqtSignal()
 
     def __init__(self, asin: str):
@@ -32,10 +32,11 @@ class _FetchThread(QThread):
     def run(self):
         from ..fetcher import fetch_amazon_meta
         result = fetch_amazon_meta(self._asin)
-        desc = result.get("description") or ""
-        copy = result.get("copyright") or ""
-        if desc or copy:
-            self.success.emit(desc, copy)
+        desc  = result.get("description") or ""
+        copy  = result.get("copyright")   or ""
+        cover = result.get("cover_url")   or ""
+        if desc or copy or cover:
+            self.success.emit(desc, copy, cover)
         else:
             self.failed.emit()
 
@@ -753,11 +754,13 @@ class EditorPanel(QWidget):
         self._fetch_thread.failed.connect(self._on_fetch_failed)
         self._fetch_thread.start()
 
-    def _on_fetch_success(self, description: str, copyright_val: str):
+    def _on_fetch_success(self, description: str, copyright_val: str, cover_url: str):
         if description:
             self._desc_edit.setPlainText(description)
         if copyright_val:
             self._vars["copyright"].setText(copyright_val)
+        if cover_url and self._book and not self._book.config.cover_url:
+            self._book.config.cover_url = cover_url
         self._fetch_btn.setEnabled(True)
         self._fetch_btn.setText("📥 Fetch Amazon")
 

@@ -20,6 +20,7 @@ from .editor_panel import EditorPanel
 from .queue_panel import QueuePanel
 from .console_panel import ConsolePanel
 from .scene_copy_panel import SceneCopyPanel
+from .prez_panel import PrezPanel
 from .settings_dialog import SettingsDialog
 from .referential_panel import ReferentialPanel
 from .theme import DARK_STYLESHEET
@@ -131,6 +132,7 @@ class AudiobookManagerApp:
         self._build_editor_page()
         self._build_queue_page()
         self._build_scene_copy_page()
+        self._build_prez_page()
         self._build_console_page()
         self._build_referential_page()
 
@@ -142,6 +144,11 @@ class AudiobookManagerApp:
         self.scene_copy_panel = SceneCopyPanel(self)
         self._pages["scene_copy"] = self.scene_copy_panel
         self._stack.addWidget(self.scene_copy_panel)
+
+    def _build_prez_page(self):
+        self.prez_panel = PrezPanel(self)
+        self._pages["prez"] = self.prez_panel
+        self._stack.addWidget(self.prez_panel)
 
     def _on_queue_changed(self):
         self.library_panel.refresh_queue_checkboxes()
@@ -188,6 +195,7 @@ class AudiobookManagerApp:
             ("editor",       "✏",  "Éditeur"),
             ("queue",        "▶",  "Conversion"),
             ("scene_copy",   "📋", "Copie scène"),
+            ("prez",         "📰", "Présentation"),
             ("console",      "🖥", "Console"),
             ("referential",  "📚", "Référentiel"),
         ]:
@@ -223,6 +231,8 @@ class AudiobookManagerApp:
             self._stack.setCurrentWidget(self._pages[page_id])
             if page_id == "scene_copy":
                 self.scene_copy_panel.refresh_books()
+            elif page_id == "prez":
+                self.prez_panel.refresh_books()
             elif page_id == "referential":
                 self.referential_panel.refresh()
         for pid, btn in self._nav_btns.items():

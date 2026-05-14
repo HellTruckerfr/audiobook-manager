@@ -122,6 +122,7 @@ class BookConfig:
     cover_path: str = ""
     description: str = ""
     copyright: str = ""
+    cover_url: str = ""
     selected_source_label: str = ""
     ignore_metadata_check: bool = False
     title_source: str = "detected"   # "detected" | "normalized" | "custom"
@@ -145,6 +146,7 @@ class BookConfig:
             "cover_path": self.cover_path,
             "description": self.description,
             "copyright": self.copyright,
+            "cover_url": self.cover_url,
             "selected_source_label": self.selected_source_label,
             "ignore_metadata_check": self.ignore_metadata_check,
             "title_source": self.title_source,
@@ -171,6 +173,7 @@ class BookConfig:
             cover_path=d.get("cover_path", ""),
             description=d.get("description", ""),
             copyright=d.get("copyright", ""),
+            cover_url=d.get("cover_url", ""),
             selected_source_label=d.get("selected_source_label", ""),
             ignore_metadata_check=d.get("ignore_metadata_check", False),
             title_source=d.get("title_source", "detected"),
