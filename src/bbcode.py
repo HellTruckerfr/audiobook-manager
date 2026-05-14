@@ -32,8 +32,7 @@ def _title_line(cfg, fmt_label: str = "M4B") -> str:
     return f"{author} - {title_part} - {fmt_label}{year_str}"
 
 
-def generate_prez(book: BookEntry, tracker_name: str = "La Cale",
-                  rating: str = "", fmt: str = "m4b") -> str:
+def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b") -> str:
     cfg = book.config
     fmt_label = "M4B" if fmt == "m4b" else "MP3"
     info: AudioInfo | None = (
@@ -74,7 +73,7 @@ def generate_prez(book: BookEntry, tracker_name: str = "La Cale",
         lines.append(f"[b]Bitrate :[/b] {_bitrate_display(info)}")
         lines.append(f"[b]Taille :[/b] {_size_display(info)}")
 
-    lines += ["", f"[i]Généré par {tracker_name}[/i][/center]"]
+    lines += ["", "[/center]"]
     return "\n".join(lines)
 
 

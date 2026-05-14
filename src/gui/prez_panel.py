@@ -296,11 +296,9 @@ class PrezPanel(QWidget):
             self._bbcode_edit.clear()
             self._preview.clear()
             return
-        tracker = self.app.config_manager.app_config.tracker_name or "La Cale"
-        rating  = self._rating_le.text().strip()
-        fmt     = self._fmt_cb.currentData()
-        bbcode  = generate_prez(self._current, tracker_name=tracker,
-                                rating=rating, fmt=fmt)
+        rating = self._rating_le.text().strip()
+        fmt    = self._fmt_cb.currentData()
+        bbcode = generate_prez(self._current, rating=rating, fmt=fmt)
         self._bbcode_edit.setPlainText(bbcode)
 
         if self._tabs.currentIndex() == 1:

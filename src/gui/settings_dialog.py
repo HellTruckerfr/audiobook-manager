@@ -185,7 +185,6 @@ class SettingsDialog(QDialog):
 
         self._logo_path = QLineEdit()
         self._font_path = QLineEdit()
-        self._tracker_name = QLineEdit()
 
         for label, le, is_dir in [
             ("Logo watermark :", self._logo_path, False),
@@ -200,16 +199,6 @@ class SettingsDialog(QDialog):
             btn.clicked.connect(lambda _, l=_le: self._browse_file(l))
             row.addWidget(btn)
             vl.addLayout(row)
-
-        sep0 = QFrame()
-        sep0.setFrameShape(QFrame.Shape.HLine)
-        sep0.setStyleSheet("color: #444;")
-        vl.addWidget(sep0)
-
-        row_tracker = QHBoxLayout()
-        row_tracker.addWidget(QLabel("Nom du tracker :"), 1)
-        row_tracker.addWidget(self._tracker_name, 4)
-        vl.addLayout(row_tracker)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -320,7 +309,6 @@ class SettingsDialog(QDialog):
         self._out_mp3.setText(self.cfg.app_config.output_mp3)
         self._logo_path.setText(self.cfg.app_config.logo_path)
         self._font_path.setText(self.cfg.app_config.font_path)
-        self._tracker_name.setText(self.cfg.app_config.tracker_name)
         # Nommage
         style = self.cfg.app_config.naming_style
         for i, (key, _) in enumerate(self._NAMING_STYLES):
@@ -350,7 +338,6 @@ class SettingsDialog(QDialog):
         self.cfg.app_config.output_mp3     = self._out_mp3.text()
         self.cfg.app_config.logo_path      = self._logo_path.text()
         self.cfg.app_config.font_path      = self._font_path.text()
-        self.cfg.app_config.tracker_name   = self._tracker_name.text().strip() or "La Cale"
         self.cfg.app_config.naming_style   = self._naming_cb.currentData()
         self.cfg.app_config.metadata_required_fields = [
             key for key, cb in self._meta_field_cbs.items() if cb.isChecked()

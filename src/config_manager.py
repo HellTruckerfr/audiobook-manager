@@ -52,7 +52,6 @@ class AppConfig:
     scene_copy_include_bitrate: bool = True
     scene_copy_group: str = "HellTrucker"
     scan_ignore_paths: List[str] = field(default_factory=list)
-    tracker_name: str = "La Cale"
     ui_prefs: dict = field(default_factory=dict)
 
 
@@ -107,7 +106,6 @@ class ConfigManager:
                 scene_copy_include_bitrate=data.get("scene_copy_include_bitrate", True),
                 scene_copy_group=data.get("scene_copy_group", "HellTrucker"),
                 scan_ignore_paths=data.get("scan_ignore_paths", []),
-                tracker_name=data.get("tracker_name", "La Cale"),
                 ui_prefs=data.get("ui", {}),
             )
         if os.path.exists(self.library_path):
@@ -140,7 +138,6 @@ class ConfigManager:
             "scene_copy_include_bitrate": self.app_config.scene_copy_include_bitrate,
             "scene_copy_group": self.app_config.scene_copy_group,
             "scan_ignore_paths": self.app_config.scan_ignore_paths,
-            "tracker_name": self.app_config.tracker_name,
             "ui": self.app_config.ui_prefs,
         }
         with open(self.config_path, "w", encoding="utf-8") as f:
