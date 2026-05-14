@@ -12,9 +12,7 @@ def _codec_display(codec: str) -> str:
 
 
 def _bitrate_display(info: AudioInfo) -> str:
-    if info.vbr:
-        return f"Variable ~{info.bitrate_kbps}kbps"
-    return f"Constant {info.bitrate_kbps}kbps"
+    return f"{info.bitrate_kbps}kbps"
 
 
 def _size_display(info: AudioInfo) -> str:
@@ -62,14 +60,15 @@ def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b") -> str:
     lines += ["[color=#eab308][b]--- DÉTAILS ---[/b][/color]", ""]
     lines.append(f"[b]Auteur :[/b] {cfg.author}")
     if cfg.narrator:
-        lines.append(f"[b]Narrateur :[/b] {cfg.narrator}")
+        lines.append(f"[b]Lu par :[/b] {cfg.narrator}")
     if cfg.publisher:
         lines.append(f"[b]Éditeur :[/b] {cfg.publisher}")
     lines.append("[b]Format :[/b] Audiobook")
     lines.append(f"[b]Format du conteneur :[/b] {fmt_label}")
 
     if info:
-        lines.append(f"[b]Codec audio :[/b] {_codec_display(info.codec)}")
+        if fmt == "m4b":
+            lines.append(f"[b]Codec audio :[/b] {_codec_display(info.codec)}")
         lines.append(f"[b]Bitrate :[/b] {_bitrate_display(info)}")
         lines.append(f"[b]Taille :[/b] {_size_display(info)}")
 

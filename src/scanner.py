@@ -406,6 +406,12 @@ class Scanner:
                         info = _analyze_m4b_source(
                             os.path.join(mp3_dir, mp3_files[0]), "output_mp3")
                         if info:
+                            total = sum(
+                                os.path.getsize(os.path.join(mp3_dir, f))
+                                for f in mp3_files
+                            )
+                            info.size_mb = round(total / (1024 * 1024), 1)
+                            info.file_count = len(mp3_files)
                             self.cfg.set_source_cache(mp3_dir, fp, info.to_dict())
                             book.output_mp3_info = info
                             dirty = True
