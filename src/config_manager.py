@@ -2,6 +2,7 @@ import json
 import os
 import re
 import unicodedata
+import zipfile
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
@@ -262,6 +263,27 @@ class ConfigManager:
         stale = [p for p in list(self._scan_cache) if p not in active_paths]
         for p in stale:
             del self._scan_cache[p]
+
+    # ── Backup / Restauration ─────────────────────────────────────────
+
+    def backup(self, dest_zip: str):
+        """Crée un ZIP contenant config.json + library.json."""
+        with zipfile.ZipFile(dest_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path, name in [
+                (self.config_path,  CONFIG_FILE),
+                (self.library_path, LIBRARY_FILE),
+            ]:
+                if os.path.exists(path):
+                    zf.write(path, name)
+
+    def restore(self, zip_path: str):
+        """Extrait config.json + library.json depuis un ZIP, puis recharge."""
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = zf.namelist()
+            for name in [CONFIG_FILE, LIBRARY_FILE]:
+                if name in names:
+                    zf.extract(name, self.base_dir)
+        self.load()
 
     def reset_scan_cache(self):
         """Vide uniquement le cache de fingerprints/ffprobe.

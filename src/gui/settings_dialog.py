@@ -27,6 +27,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_output_tab(),   "Sorties")
         tabs.addTab(self._build_options_tab(),  "Options")
         tabs.addTab(self._build_ignore_tab(),   "Ignorés au scan")
+        tabs.addTab(self._build_backup_tab(),   "Sauvegarde")
         layout.addWidget(tabs, 1)
 
         btns = QDialogButtonBox(
@@ -300,6 +301,103 @@ class SettingsDialog(QDialog):
             "Les sorties de conversion seront re-détectées au prochain scan.",
         ) == QMessageBox.StandardButton.Yes:
             self._ignore_table.setRowCount(0)
+
+    # ── Onglet sauvegarde ─────────────────────────────────────────────
+
+    def _build_backup_tab(self) -> QWidget:
+        w = QWidget()
+        vl = QVBoxLayout(w)
+        vl.setContentsMargins(12, 12, 12, 12)
+        vl.setSpacing(16)
+
+        # ── Export manuel ──
+        sec2 = QLabel("Export manuel")
+        sec2.setStyleSheet("font-weight: bold; color: #ccc;")
+        vl.addWidget(sec2)
+
+        export_row = QHBoxLayout()
+        export_btn = QPushButton("📦 Exporter un backup…")
+        export_btn.setMaximumWidth(200)
+        export_btn.clicked.connect(self._export_backup)
+        self._export_status = QLabel("")
+        self._export_status.setStyleSheet("font-size: 8.5pt;")
+        export_row.addWidget(export_btn)
+        export_row.addWidget(self._export_status)
+        export_row.addStretch()
+        vl.addLayout(export_row)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color: #333;")
+        vl.addWidget(sep2)
+
+        # ── Restauration ──
+        sec3 = QLabel("Restaurer depuis un backup")
+        sec3.setStyleSheet("font-weight: bold; color: #ccc;")
+        vl.addWidget(sec3)
+
+        warn = QLabel(
+            "⚠ La restauration remplace immédiatement config.json et library.json. "
+            "Relancez l'application pour que les changements soient pris en compte."
+        )
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #e8a020; font-size: 8.5pt;")
+        vl.addWidget(warn)
+
+        restore_row = QHBoxLayout()
+        restore_btn = QPushButton("📂 Restaurer depuis un backup…")
+        restore_btn.setMaximumWidth(230)
+        restore_btn.clicked.connect(self._restore_backup)
+        self._restore_status = QLabel("")
+        self._restore_status.setStyleSheet("font-size: 8.5pt;")
+        restore_row.addWidget(restore_btn)
+        restore_row.addWidget(self._restore_status)
+        restore_row.addStretch()
+        vl.addLayout(restore_row)
+
+        vl.addStretch()
+        return w
+
+    def _export_backup(self):
+        import datetime as _dt
+        ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"audiobook_backup_{ts}.zip"
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Exporter un backup", default_name,
+            "Backup ZIP (*.zip)"
+        )
+        if not dest:
+            return
+        try:
+            self.cfg.backup(dest)
+            self._export_status.setStyleSheet("color: #57cc7a; font-size: 8.5pt;")
+            self._export_status.setText(f"✓ Exporté")
+        except Exception as e:
+            self._export_status.setStyleSheet("color: #e05555; font-size: 8.5pt;")
+            self._export_status.setText(f"✗ {e}")
+
+    def _restore_backup(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Restaurer depuis un backup", "",
+            "Backup ZIP (*.zip)"
+        )
+        if not path:
+            return
+        reply = QMessageBox.warning(
+            self, "Restauration",
+            f"Écraser config.json et library.json avec :\n{path}\n\n"
+            "Cette action est irréversible (sauf backup préalable).\nContinuer ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.cfg.restore(path)
+            self._restore_status.setStyleSheet("color: #57cc7a; font-size: 8.5pt;")
+            self._restore_status.setText("✓ Restauré — relancez l'application")
+        except Exception as e:
+            self._restore_status.setStyleSheet("color: #e05555; font-size: 8.5pt;")
+            self._restore_status.setText(f"✗ {e}")
 
     # ── Load / Save ───────────────────────────────────────────────────
 
