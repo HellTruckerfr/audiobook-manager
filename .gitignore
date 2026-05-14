@@ -1,3 +1,6 @@
+# Test/temp files
+_test_*.txt
+
 # Personal data — not committed
 library.json
 library.json.bak*

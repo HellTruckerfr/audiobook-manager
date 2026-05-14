@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QLabel, QLineEdit, QComboBox, QCheckBox, QCompleter,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFrame, QMenu,
-    QTextEdit,
+    QTextEdit, QRadioButton, QButtonGroup,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QPixmap, QColor
@@ -99,6 +99,7 @@ class EditorPanel(QWidget):
         layout.addWidget(self._build_source_bar())
         layout.addWidget(self._build_tabs(), 1)
         layout.addWidget(self._build_bottom_bar())
+        self._load_title_source("detected")
 
     # ── Barre source ──────────────────────────────────────────────────
 
@@ -173,7 +174,7 @@ class EditorPanel(QWidget):
             ("language",   "Langue"),
             ("asin",       "ASIN"),
             ("publisher",  "Éditeur"),
-            ("encoded_by", "Encodé par"),
+            ("copyright",  "Copyright"),
         ]:
             field_w = _AutoCombo() if key in _COMBO_FIELDS else QLineEdit()
             self._vars[key] = field_w
@@ -214,14 +215,6 @@ class EditorPanel(QWidget):
         self._desc_edit.setPlaceholderText("Résumé du livre…")
         outer.addWidget(self._desc_edit)
 
-        # Copyright
-        copy_row = QHBoxLayout()
-        copy_row.addWidget(QLabel("Copyright :"))
-        self._copyright_le = QLineEdit()
-        self._copyright_le.setPlaceholderText("© 2020 Audible Studios")
-        copy_row.addWidget(self._copyright_le)
-        outer.addLayout(copy_row)
-
         self._watermark_cb = QCheckBox("Watermark sur la cover")
         outer.addWidget(self._watermark_cb)
 
@@ -240,8 +233,22 @@ class EditorPanel(QWidget):
         vl = QVBoxLayout(w)
         vl.setContentsMargins(6, 6, 6, 6)
 
-        self._chap_table = QTableWidget(0, 4)
-        self._chap_table.setHorizontalHeaderLabels(["#", "Titre détecté", "Titre perso", "Durée"])
+        # Radio buttons — choix de la source de titres
+        source_row = QHBoxLayout()
+        source_row.addWidget(QLabel("Titre à utiliser :"))
+        self._title_source_group = QButtonGroup(self)
+        for value, label in [("detected", "Détecté"), ("normalized", "Normalisé"), ("custom", "Perso")]:
+            rb = QRadioButton(label)
+            rb.setProperty("title_source_value", value)
+            self._title_source_group.addButton(rb)
+            source_row.addWidget(rb)
+        source_row.addStretch()
+        self._title_source_group.buttonClicked.connect(self._on_title_source_changed)
+        vl.addLayout(source_row)
+
+        self._chap_table = QTableWidget(0, 5)
+        self._chap_table.setHorizontalHeaderLabels(
+            ["#", "Titre détecté", "Titre normalisé", "Titre perso", "Durée"])
         self._chap_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._chap_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._chap_table.setShowGrid(False)
@@ -249,12 +256,13 @@ class EditorPanel(QWidget):
         self._chap_table.horizontalHeader().setHighlightSections(False)
 
         hh = self._chap_table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hh.setStretchLastSection(False)
         self._chap_table.setColumnWidth(0, 40)
-        self._chap_table.setColumnWidth(3, 70)
+        self._chap_table.setColumnWidth(1, 220)
+        self._chap_table.setColumnWidth(2, 220)
+        self._chap_table.setColumnWidth(3, 220)
+        self._chap_table.setColumnWidth(4, 70)
         self._chap_table.doubleClicked.connect(self._edit_chapter)
         vl.addWidget(self._chap_table, 1)
 
@@ -394,11 +402,11 @@ class EditorPanel(QWidget):
         self._watermark_cb.setChecked(cfg.watermark)
         self._ignore_meta_cb.setChecked(cfg.ignore_metadata_check)
         self._desc_edit.setPlainText(cfg.description)
-        self._copyright_le.setText(cfg.copyright)
         self._cover_path_lbl.setText(cfg.cover_path)
         self._tag_status.setText("")
 
         self._populate_source_cb(book)
+        self._load_title_source(cfg.title_source)
         # Chapitres : si rien en cache, lance un ffprobe à la demande
         if not book.chapters and book.sources:
             self._lazy_load_chapters(book)
@@ -563,10 +571,15 @@ class EditorPanel(QWidget):
     # ── Chapitres ─────────────────────────────────────────────────────
 
     def _load_chapters(self, book: BookEntry):
+        from ..normalizer import normalize_chapter_title
         self._chap_table.setRowCount(len(book.chapters))
         for row, ch in enumerate(book.chapters):
             for col, text in enumerate([
-                str(ch.index), ch.detected_title, ch.custom_title, _fmt_duration(ch.duration_s)
+                str(ch.index),
+                ch.detected_title,
+                normalize_chapter_title(ch.detected_title),
+                ch.custom_title,
+                _fmt_duration(ch.duration_s),
             ]):
                 it = QTableWidgetItem(text)
                 it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -580,7 +593,7 @@ class EditorPanel(QWidget):
             return
         row = rows[0].row()
         idx     = int(self._chap_table.item(row, 0).text())
-        current = self._chap_table.item(row, 2).text() or self._chap_table.item(row, 1).text()
+        current = self._chap_table.item(row, 3).text() or self._chap_table.item(row, 1).text()
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Modifier le titre")
@@ -600,7 +613,7 @@ class EditorPanel(QWidget):
             for ch in self._book.chapters:
                 if ch.index == idx:
                     ch.custom_title = new_title
-            self._chap_table.item(row, 2).setText(new_title)
+            self._chap_table.item(row, 3).setText(new_title)
 
     def _reset_chapter(self):
         if not self._book:
@@ -614,7 +627,7 @@ class EditorPanel(QWidget):
         for ch in self._book.chapters:
             if ch.index == idx:
                 ch.custom_title = ""
-        self._chap_table.item(row, 2).setText("")
+        self._chap_table.item(row, 3).setText("")
 
     def _reset_all_chapters(self):
         if not self._book:
@@ -701,6 +714,16 @@ class EditorPanel(QWidget):
 
     # ── Sauvegarde ────────────────────────────────────────────────────
 
+    def _load_title_source(self, value: str):
+        for btn in self._title_source_group.buttons():
+            if btn.property("title_source_value") == value:
+                btn.setChecked(True)
+                break
+
+    def _on_title_source_changed(self, btn):
+        if self._book:
+            self._book.config.title_source = btn.property("title_source_value")
+
     def _apply_to_config(self):
         if not self._book:
             return
@@ -712,7 +735,9 @@ class EditorPanel(QWidget):
         cfg.watermark   = self._watermark_cb.isChecked()
         cfg.ignore_metadata_check = self._ignore_meta_cb.isChecked()
         cfg.description = self._desc_edit.toPlainText().strip()
-        cfg.copyright   = self._copyright_le.text().strip()
+        checked = self._title_source_group.checkedButton()
+        if checked:
+            cfg.title_source = checked.property("title_source_value")
         src = self._get_source()
         if src:
             cfg.selected_source_label = src.folder_label
@@ -732,7 +757,7 @@ class EditorPanel(QWidget):
         if description:
             self._desc_edit.setPlainText(description)
         if copyright_val:
-            self._copyright_le.setText(copyright_val)
+            self._vars["copyright"].setText(copyright_val)
         self._fetch_btn.setEnabled(True)
         self._fetch_btn.setText("📥 Fetch Amazon")
 

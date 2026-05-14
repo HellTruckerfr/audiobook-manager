@@ -3,10 +3,11 @@ import re
 import shutil
 import subprocess
 import threading
+import unicodedata
 from typing import List, Optional, Dict
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QFrame,
     QLabel, QLineEdit, QPushButton, QCheckBox, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QMessageBox, QGroupBox,
@@ -24,114 +25,194 @@ _LANG_MAP = {
 }
 
 _TEMPLATE_HELP = (
-    "Variables disponibles : "
-    "{author} {title} {series} {volume} {year} {lang} "
-    "{format} {codec} {bitrate} {group}\n"
-    "Le template dossier accepte des / pour créer plusieurs niveaux "
-    "(ex. {author}/{series}/{volume}/release). "
-    "Les segments dont toutes les variables sont vides sont automatiquement supprimés.\n"
-    "Les espaces sont remplacés par des points. {bitrate} et {codec} ne sont "
-    "écrits que si la case correspondante est cochée."
+    "Template fichier — variables : "
+    "{author}  {series}  {volume}  {integrale}  {title}  {year}  "
+    "{lang}  {format}  {bitrate}  {codec}  {group}\n"
+    "Template dossier — variables supplémentaires : "
+    "{author_raw}  {series_raw}  {tag_album}  {series_release}  {book_release}\n"
+    "Les segments vides sont supprimés automatiquement."
 )
 
+_TOGGLE_STYLE = """
+QPushButton {
+    text-align: left; padding: 5px 10px;
+    background: #252525; border: 1px solid #3a3a3a;
+    border-radius: 4px; font-weight: bold; color: #ccc;
+}
+QPushButton:hover { background: #2e2e2e; }
+"""
 
-def _dot(s: str) -> str:
-    return re.sub(r'\.{2,}', '.', s.replace(" ", ".")).strip(".")
+_FILTER_STYLE = """
+QPushButton {
+    padding: 3px 12px; border: 1px solid #555;
+    background: #2a2a2a; border-radius: 3px; color: #ccc;
+}
+QPushButton:checked { background: #0067c0; border-color: #0067c0; color: white; }
+QPushButton:hover:!checked { background: #333; }
+"""
 
 
-def _clean(s: str) -> str:
-    """Supprime les caractères interdits dans les noms Windows."""
-    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", s).strip(" .")
-
+# ── Helpers de nommage ────────────────────────────────────────────────
 
 def _vol_number(volume: str) -> int:
     m = re.search(r'\d+', volume)
     return int(m.group(0)) if m else 0
 
 
-def _bitrate_label(book: BookEntry) -> str:
-    """Retourne ex. '128kbps' depuis un BookConfig.bitrate '128k' ou un AudioInfo."""
-    raw = (book.config.bitrate or "").lower().strip()
+def _scene_name(s: str) -> str:
+    s = "".join(
+        c for c in unicodedata.normalize("NFD", s)
+        if unicodedata.category(c) != "Mn"
+    )
+    parts = re.split(r"[\s']+", s)
+    cleaned = [p if '.' in p else p.capitalize() for p in parts if p]
+    result = ".".join(cleaned)
+    result = re.sub(r"[^A-Za-z0-9.\-]", "", result)
+    return re.sub(r"\.{2,}", ".", result).strip(".")
+
+
+def _normalize_bitrate(kbps: int) -> str:
+    for std in (64, 128):
+        if abs(kbps - std) <= 10:
+            return f"{std}kbps"
+    return f"{kbps}kbps"
+
+
+def _raw_bitrate_kbps(book: BookEntry) -> int:
+    info = book.output_m4b_info or book.selected_source
+    if info and info.bitrate_kbps:
+        return info.bitrate_kbps
+    raw = (book.config.bitrate or "128k").lower().strip()
     if raw.endswith("kbps"):
-        return raw
+        return int(raw[:-4]) if raw[:-4].isdigit() else 128
     if raw.endswith("k"):
-        return raw[:-1] + "kbps"
-    if raw.isdigit():
-        return raw + "kbps"
-    src = book.selected_source
-    if src and src.bitrate_kbps:
-        return f"{src.bitrate_kbps}kbps"
-    return raw or "?"
+        return int(raw[:-1]) if raw[:-1].isdigit() else 128
+    return int(raw) if raw.isdigit() else 128
 
 
-def _codec_label(book: BookEntry) -> str:
-    src = book.selected_source
-    if src and src.codec:
-        # M4B contient toujours de l'AAC ; on standardise.
-        c = src.codec.lower()
-        if c in ("aac", "alac", "mp3", "flac", "opus", "vorbis"):
-            return c.upper()
-        return c.upper()
-    # Sortie M4B = AAC par convention
-    return "AAC"
+def _vol_label(vol_num: int, series_name: str, all_books: List[BookEntry]) -> str:
+    max_vol = vol_num
+    if all_books and series_name:
+        sn_low = series_name.lower()
+        for b in all_books:
+            sn = (b.config.series or b.detected_series or "").lower()
+            if sn == sn_low and b.config.volume:
+                v = _vol_number(b.config.volume)
+                if v > max_vol:
+                    max_vol = v
+    return f"T{vol_num:03d}" if max_vol >= 100 else f"T{vol_num:02d}"
 
 
-def _format_label(book: BookEntry) -> str:
-    p = book.output_m4b_path or ""
-    ext = os.path.splitext(p)[1].lower().lstrip(".")
-    return ext.upper() if ext else "M4B"
-
-
-def _build_context(book: BookEntry, group: str,
-                   include_codec: bool, include_bitrate: bool) -> Dict[str, str]:
+def _build_context(book: BookEntry, all_books: List[BookEntry],
+                   group: str, include_codec: bool, include_bitrate: bool,
+                   fmt: str, series_mode: bool = False) -> Dict[str, str]:
     cfg = book.config
-    lang = (cfg.language or "FR").upper()
-    author_raw = cfg.author or book.detected_author or ""
-    first_author = author_raw.split(",")[0].strip()
+    in_series   = bool(cfg.series and cfg.volume)
+    is_integrale = bool(cfg.series and not cfg.volume)
+    lang         = _LANG_MAP.get((cfg.language or "FR").upper(), "FRENCH")
+    author_raw   = cfg.author or book.detected_author or ""
+    author       = _scene_name(author_raw.split(",")[0].strip())
+    series       = _scene_name(cfg.series or "")
+    kbps         = _raw_bitrate_kbps(book)
+    bitrate      = _normalize_bitrate(kbps) if include_bitrate else ""
+
+    if include_codec:
+        if fmt == "MP3":
+            codec = ""  # format=MP3 already implies codec; avoids "MP3.128kbps.AAC-"
+        else:
+            _info = book.output_m4b_info or book.selected_source
+            _raw  = (_info.codec or "aac").lower() if _info else "aac"
+            _map  = {"aac": "AAC", "mp3": "MP3", "opus": "Opus", "flac": "FLAC"}
+            codec = _map.get(_raw, _raw.upper())
+    else:
+        codec = ""
+
+    src_info   = book.selected_source
+    m4b_info   = book.output_m4b_info
+    tag_album  = (
+        (src_info.tag_album  if src_info  and src_info.tag_album  else None)
+        or (m4b_info.tag_album if m4b_info and m4b_info.tag_album else None)
+        or cfg.title or book.detected_title or ""
+    )
+    series_raw = cfg.series or ""
+
+    if series_mode:
+        vol_str   = ""
+        integrale = "Integrale" if cfg.series else ""
+        title     = ""
+        year      = ""
+    else:
+        vol_str   = _vol_label(_vol_number(cfg.volume), cfg.series or "", all_books) if cfg.volume else ""
+        integrale = "Integrale" if is_integrale else ""
+        title     = _scene_name(cfg.title or book.detected_title or "")
+        year      = "" if (in_series or is_integrale) else (cfg.year or "")
+
     return {
-        "author":  _dot(_clean(first_author)),
-        "title":   _dot(_clean(cfg.title  or book.detected_title)),
-        "series":  _dot(_clean(cfg.series or book.detected_series)),
-        "volume":  f"T{_vol_number(cfg.volume):02d}" if cfg.volume else "",
-        "year":    cfg.year or "",
-        "lang":    _LANG_MAP.get(lang, lang),
-        "format":  _format_label(book),
-        "codec":   _codec_label(book) if include_codec else "",
-        "bitrate": _bitrate_label(book) if include_bitrate else "",
-        "group":   group or "HellTrucker",
+        "author_raw": author_raw,
+        "author":     author,
+        "title":      title,
+        "series":     series,
+        "series_raw": series_raw,
+        "volume":     vol_str,
+        "integrale":  integrale,
+        "year":       year,
+        "lang":       lang,
+        "format":     fmt,
+        "bitrate":    bitrate,
+        "codec":      codec,
+        "group":      group or "HellTrucker",
+        "tag_album":  tag_album,
     }
 
 
-def _render_segment(template: str, ctx: Dict[str, str]) -> str:
-    """Rend un seul segment (sans /). Si toutes les variables {x} étaient vides,
-    le résultat sera vide aussi → l'appelant peut le filtrer."""
-    placeholders = re.findall(r'\{([a-z_]+)\}', template)
-    has_var = bool(placeholders)
-    any_filled = any(ctx.get(k, "") for k in placeholders)
-    out = template
+def _render_release(template: str, ctx: Dict[str, str]) -> str:
+    result = template
     for k, v in ctx.items():
-        out = out.replace("{" + k + "}", v)
-    out = re.sub(r'\.{2,}', '.', out)
-    out = re.sub(r'\.-', '-', out)
-    out = re.sub(r'-\.+', '-', out)
-    out = out.strip(". -")
-    if has_var and not any_filled:
-        return ""
-    return out
+        result = result.replace(f"{{{k}}}", v)
+    result = re.sub(r'\.{2,}', '.', result).strip('.')
+    result = re.sub(r'\.-', '-', result)
+    result = re.sub(r'-$', '', result)
+    return result
 
 
-def _render_path_template(template: str, ctx: Dict[str, str]) -> str:
-    """Rend un template multi-niveaux (peut contenir / ou \\). Les segments vides
-    après rendu sont retirés. Renvoie un chemin relatif joint avec os.sep."""
-    parts = re.split(r'[\\/]+', template.strip("/\\ "))
-    rendered = [_render_segment(p, ctx) for p in parts]
-    rendered = [r for r in rendered if r]
-    return os.path.join(*rendered) if rendered else ""
+def _render_dir(template: str, ctx: Dict[str, str]) -> str:
+    result = template
+    for k, v in ctx.items():
+        result = result.replace(f"{{{k}}}", v)
+    parts = [p for p in result.replace("\\", "/").split("/") if p.strip()]
+    return os.path.join(*parts) if parts else ""
+
+
+def _compute_releases(book: BookEntry, all_books: List[BookEntry],
+                      group: str, include_codec: bool, include_bitrate: bool,
+                      file_tpl: str, fmt: str):
+    cfg          = book.config
+    is_integrale = bool(cfg.series and not cfg.volume)
+    series_release = ""
+    book_release   = ""
+    if cfg.series:
+        s_ctx = _build_context(book, all_books, group, include_codec, include_bitrate,
+                               fmt, series_mode=True)
+        series_release = _render_release(file_tpl, s_ctx)
+    if not is_integrale:
+        b_ctx = _build_context(book, all_books, group, include_codec, include_bitrate,
+                               fmt, series_mode=False)
+        book_release = _render_release(file_tpl, b_ctx)
+    return series_release, book_release
 
 
 class _CopyBridge(QObject):
-    progress = pyqtSignal(int, int, str)  # done, total, current_name
-    finished = pyqtSignal(int, int, list)  # ok, fail, errors
+    progress = pyqtSignal(int, int, str)
+    finished = pyqtSignal(int, int, list)
+
+
+# ── Colonnes du tableau ───────────────────────────────────────────────
+_COL_CB   = 0
+_COL_TITLE = 1
+_COL_AUTHOR = 2
+_COL_M4B  = 3
+_COL_MP3  = 4
+_COL_DEST = 5
 
 
 class SceneCopyPanel(QWidget):
@@ -145,52 +226,80 @@ class SceneCopyPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 8)
-        layout.setSpacing(10)
+        layout.setSpacing(6)
 
-        layout.addWidget(self._build_settings_box())
+        # ── En-tête rétractable ───────────────────────────────────────
+        self._toggle_btn = QPushButton("▼  Destination & nommage")
+        self._toggle_btn.setCheckable(True)
+        self._toggle_btn.setChecked(True)
+        self._toggle_btn.setStyleSheet(_TOGGLE_STYLE)
+        self._toggle_btn.toggled.connect(self._on_settings_toggled)
+        layout.addWidget(self._toggle_btn)
+
+        self._settings_widget = self._build_settings_content()
+        layout.addWidget(self._settings_widget)
+
         layout.addWidget(self._build_table_box(), 1)
         layout.addWidget(self._build_action_bar())
 
         self._update_preview()
 
-    # ── Settings box ───────────────────────────────────────────────────
+    # ── Rétraction ─────────────────────────────────────────────────────
 
-    def _build_settings_box(self) -> QGroupBox:
+    def _on_settings_toggled(self, expanded: bool):
+        self._settings_widget.setVisible(expanded)
+        self._toggle_btn.setText(
+            "▼  Destination & nommage" if expanded else "▶  Destination & nommage")
+
+    # ── Contenu des réglages ───────────────────────────────────────────
+
+    def _build_settings_content(self) -> QFrame:
         cfg = self.app.config_manager.app_config
-        box = QGroupBox("Destination & nommage")
-        outer = QVBoxLayout(box)
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        outer = QVBoxLayout(frame)
+        outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(8)
 
-        # Destination
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Dossier de copie :"))
-        self._dest_le = QLineEdit(cfg.scene_copy_dest)
-        self._dest_le.setPlaceholderText("Choisir un dossier de destination…")
-        self._dest_le.editingFinished.connect(self._save_settings)
-        row.addWidget(self._dest_le, 1)
-        browse = QPushButton("…")
-        browse.setMaximumWidth(30)
-        browse.clicked.connect(self._browse_dest)
-        row.addWidget(browse)
-        outer.addLayout(row)
+        # Dossier M4B
+        m4b_row = QHBoxLayout()
+        m4b_row.addWidget(QLabel("Dossier M4B :"))
+        self._dest_m4b_le = QLineEdit(cfg.scene_copy_dest_m4b)
+        self._dest_m4b_le.setPlaceholderText("Dossier de destination pour les M4B…")
+        self._dest_m4b_le.editingFinished.connect(self._save_settings)
+        m4b_row.addWidget(self._dest_m4b_le, 1)
+        b = QPushButton("…"); b.setMaximumWidth(30)
+        b.clicked.connect(lambda: self._browse_dest(self._dest_m4b_le))
+        m4b_row.addWidget(b)
+        outer.addLayout(m4b_row)
 
-        # Group
+        # Dossier MP3
+        mp3_row = QHBoxLayout()
+        mp3_row.addWidget(QLabel("Dossier MP3 :"))
+        self._dest_mp3_le = QLineEdit(cfg.scene_copy_dest_mp3)
+        self._dest_mp3_le.setPlaceholderText("Dossier de destination pour les MP3…")
+        self._dest_mp3_le.editingFinished.connect(self._save_settings)
+        mp3_row.addWidget(self._dest_mp3_le, 1)
+        b2 = QPushButton("…"); b2.setMaximumWidth(30)
+        b2.clicked.connect(lambda: self._browse_dest(self._dest_mp3_le))
+        mp3_row.addWidget(b2)
+        outer.addLayout(mp3_row)
+
+        # Groupe + options
         grp_row = QHBoxLayout()
         grp_row.addWidget(QLabel("Groupe / tag :"))
         self._group_le = QLineEdit(cfg.scene_copy_group)
         self._group_le.setMaximumWidth(220)
         self._group_le.editingFinished.connect(self._save_settings)
-        self._group_le.textChanged.connect(self._update_preview)
+        self._group_le.textChanged.connect(self._on_options_changed)
         grp_row.addWidget(self._group_le)
-
-        self._codec_cb = QCheckBox("Inclure {codec}")
+        self._codec_cb = QCheckBox("Inclure codec")
         self._codec_cb.setChecked(cfg.scene_copy_include_codec)
-        self._codec_cb.toggled.connect(self._on_toggle_codec_bitrate)
+        self._codec_cb.toggled.connect(self._on_options_changed)
         grp_row.addWidget(self._codec_cb)
-
-        self._bitrate_cb = QCheckBox("Inclure {bitrate}")
+        self._bitrate_cb = QCheckBox("Inclure bitrate")
         self._bitrate_cb.setChecked(cfg.scene_copy_include_bitrate)
-        self._bitrate_cb.toggled.connect(self._on_toggle_codec_bitrate)
+        self._bitrate_cb.toggled.connect(self._on_options_changed)
         grp_row.addWidget(self._bitrate_cb)
         grp_row.addStretch()
         outer.addLayout(grp_row)
@@ -203,17 +312,14 @@ class SceneCopyPanel(QWidget):
         self._file_tpl_le = QLineEdit(cfg.scene_copy_file_template)
         for le in (self._dir_tpl_le, self._file_tpl_le):
             le.editingFinished.connect(self._save_settings)
-            le.textChanged.connect(self._on_template_changed)
+            le.textChanged.connect(self._on_options_changed)
         form.addRow("Template dossier :", self._dir_tpl_le)
-        form.addRow("Template fichier :", self._file_tpl_le)
+        form.addRow("Template fichier  :", self._file_tpl_le)
         outer.addLayout(form)
 
         reset_row = QHBoxLayout()
         reset_row.addStretch()
         reset_btn = QPushButton("↺  Réinitialiser les templates")
-        reset_btn.setToolTip(
-            "Restaure les templates par défaut (arborescence "
-            "auteur/série/volume/release).")
         reset_btn.clicked.connect(self._reset_templates)
         reset_row.addWidget(reset_btn)
         outer.addLayout(reset_row)
@@ -223,7 +329,6 @@ class SceneCopyPanel(QWidget):
         help_lbl.setStyleSheet("color: #888; font-size: 8.5pt;")
         outer.addWidget(help_lbl)
 
-        # Aperçu
         self._preview_lbl = QLabel("")
         self._preview_lbl.setTextFormat(Qt.TextFormat.PlainText)
         self._preview_lbl.setStyleSheet(
@@ -232,7 +337,7 @@ class SceneCopyPanel(QWidget):
         self._preview_lbl.setWordWrap(True)
         outer.addWidget(self._preview_lbl)
 
-        return box
+        return frame
 
     # ── Table box ──────────────────────────────────────────────────────
 
@@ -240,7 +345,6 @@ class SceneCopyPanel(QWidget):
         box = QGroupBox("Livres à copier")
         vl = QVBoxLayout(box)
 
-        # Toolbar table
         bar = QHBoxLayout()
         bar.addWidget(QLabel("🔍"))
         self._search = QLineEdit()
@@ -249,10 +353,20 @@ class SceneCopyPanel(QWidget):
         self._search.textChanged.connect(self._refresh_filter)
         bar.addWidget(self._search)
 
-        self._only_existing_cb = QCheckBox("Uniquement les M4B existants")
-        self._only_existing_cb.setChecked(True)
-        self._only_existing_cb.toggled.connect(self._refresh_filter)
-        bar.addWidget(self._only_existing_cb)
+        # Filtres M4B / MP3
+        self._filter_m4b_btn = QPushButton("M4B")
+        self._filter_m4b_btn.setCheckable(True)
+        self._filter_m4b_btn.setStyleSheet(_FILTER_STYLE)
+        self._filter_m4b_btn.setToolTip("Afficher uniquement les livres avec M4B disponible")
+        self._filter_m4b_btn.toggled.connect(self._refresh_filter)
+        bar.addWidget(self._filter_m4b_btn)
+
+        self._filter_mp3_btn = QPushButton("MP3")
+        self._filter_mp3_btn.setCheckable(True)
+        self._filter_mp3_btn.setStyleSheet(_FILTER_STYLE)
+        self._filter_mp3_btn.setToolTip("Afficher uniquement les livres avec MP3 disponible")
+        self._filter_mp3_btn.toggled.connect(self._refresh_filter)
+        bar.addWidget(self._filter_mp3_btn)
 
         bar.addStretch()
         sel_all = QPushButton("Tout cocher")
@@ -263,8 +377,9 @@ class SceneCopyPanel(QWidget):
         bar.addWidget(sel_none)
         vl.addLayout(bar)
 
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["", "Titre", "Auteur", "Destination prévue"])
+        self._table = QTableWidget(0, 6)
+        self._table.setHorizontalHeaderLabels(
+            ["", "Titre", "Auteur", "M4B", "MP3", "Destination M4B prévue"])
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setShowGrid(False)
@@ -272,13 +387,17 @@ class SceneCopyPanel(QWidget):
         self._table.verticalHeader().hide()
         self._table.horizontalHeader().setHighlightSections(False)
         hh = self._table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(0, 32)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        self._table.setColumnWidth(1, 260)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        self._table.setColumnWidth(2, 160)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(_COL_CB,     QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(_COL_CB,  32)
+        hh.setSectionResizeMode(_COL_TITLE,  QHeaderView.ResizeMode.Interactive)
+        self._table.setColumnWidth(_COL_TITLE, 220)
+        hh.setSectionResizeMode(_COL_AUTHOR, QHeaderView.ResizeMode.Interactive)
+        self._table.setColumnWidth(_COL_AUTHOR, 150)
+        hh.setSectionResizeMode(_COL_M4B,   QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(_COL_M4B, 45)
+        hh.setSectionResizeMode(_COL_MP3,   QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(_COL_MP3, 45)
+        hh.setSectionResizeMode(_COL_DEST,  QHeaderView.ResizeMode.Stretch)
         self._table.itemChanged.connect(self._on_item_changed)
         vl.addWidget(self._table, 1)
 
@@ -304,9 +423,15 @@ class SceneCopyPanel(QWidget):
         self._copy_btn.clicked.connect(self._start_copy)
         bl.addWidget(self._copy_btn)
 
-        self._open_dest_btn = QPushButton("📂  Ouvrir destination")
-        self._open_dest_btn.clicked.connect(self._open_dest)
-        bl.addWidget(self._open_dest_btn)
+        open_m4b = QPushButton("📂  M4B")
+        open_m4b.setToolTip("Ouvrir le dossier M4B")
+        open_m4b.clicked.connect(lambda: self._open_dest(self._dest_m4b_le))
+        bl.addWidget(open_m4b)
+
+        open_mp3 = QPushButton("📂  MP3")
+        open_mp3.setToolTip("Ouvrir le dossier MP3")
+        open_mp3.clicked.connect(lambda: self._open_dest(self._dest_mp3_le))
+        bl.addWidget(open_mp3)
 
         bl.addStretch()
         self._status_lbl = QLabel("")
@@ -317,7 +442,6 @@ class SceneCopyPanel(QWidget):
     # ── Public API ─────────────────────────────────────────────────────
 
     def refresh_books(self):
-        """Recharge la liste depuis la bibliothèque."""
         self._books = list(self.app.scanner.load_last_books() or [])
         self._fill_table()
         self._update_preview()
@@ -326,20 +450,17 @@ class SceneCopyPanel(QWidget):
 
     def _save_settings(self):
         cfg = self.app.config_manager.app_config
-        cfg.scene_copy_dest             = self._dest_le.text().strip()
-        cfg.scene_copy_group            = self._group_le.text().strip() or "HellTrucker"
-        cfg.scene_copy_dir_template     = self._dir_tpl_le.text().strip()
-        cfg.scene_copy_file_template    = self._file_tpl_le.text().strip()
-        cfg.scene_copy_include_codec    = self._codec_cb.isChecked()
-        cfg.scene_copy_include_bitrate  = self._bitrate_cb.isChecked()
+        cfg.scene_copy_dest_m4b        = self._dest_m4b_le.text().strip()
+        cfg.scene_copy_dest_mp3        = self._dest_mp3_le.text().strip()
+        cfg.scene_copy_dir_template    = self._dir_tpl_le.text().strip()
+        cfg.scene_copy_file_template   = self._file_tpl_le.text().strip()
+        cfg.scene_copy_group           = self._group_le.text().strip() or "HellTrucker"
+        cfg.scene_copy_include_codec   = self._codec_cb.isChecked()
+        cfg.scene_copy_include_bitrate = self._bitrate_cb.isChecked()
         self.app.config_manager.save_config()
 
-    def _on_toggle_codec_bitrate(self):
+    def _on_options_changed(self):
         self._save_settings()
-        self._update_preview()
-        self._fill_destination_column()
-
-    def _on_template_changed(self):
         self._update_preview()
         self._fill_destination_column()
 
@@ -349,17 +470,17 @@ class SceneCopyPanel(QWidget):
         self._dir_tpl_le.setText(DEFAULT_SCENE_COPY_DIR_TEMPLATE)
         self._file_tpl_le.setText(DEFAULT_SCENE_COPY_FILE_TEMPLATE)
         self._save_settings()
-        self._on_template_changed()
+        self._on_options_changed()
 
-    def _browse_dest(self):
-        start = self._dest_le.text() or self.app.config_manager.app_config.output_m4b
+    def _browse_dest(self, line_edit: QLineEdit):
+        start = line_edit.text() or self.app.config_manager.app_config.output_m4b
         path = QFileDialog.getExistingDirectory(self, "Dossier de destination", start)
         if path:
-            self._dest_le.setText(path)
+            line_edit.setText(path)
             self._save_settings()
 
-    def _open_dest(self):
-        dest = self._dest_le.text().strip()
+    def _open_dest(self, line_edit: QLineEdit):
+        dest = line_edit.text().strip()
         if not dest:
             return
         if not os.path.isdir(dest):
@@ -369,7 +490,16 @@ class SceneCopyPanel(QWidget):
                 return
         subprocess.Popen(["explorer", os.path.normpath(dest)])
 
-    # ── Tableau ────────────────────────────────────────────────────────
+    # ── Table ──────────────────────────────────────────────────────────
+
+    def _has_m4b(self, book: BookEntry) -> bool:
+        return bool(book.output_m4b_path and os.path.exists(book.output_m4b_path))
+
+    def _has_mp3(self, book: BookEntry) -> bool:
+        return bool(book.output_mp3_dir and os.path.isdir(book.output_mp3_dir))
+
+    def _has_export(self, book: BookEntry) -> bool:
+        return self._has_m4b(book) or self._has_mp3(book)
 
     def _fill_table(self):
         self._populating = True
@@ -378,35 +508,58 @@ class SceneCopyPanel(QWidget):
             for book in self._sorted_filtered_books():
                 row = self._table.rowCount()
                 self._table.insertRow(row)
-                cb = QTableWidgetItem("")
-                cb.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-                            | Qt.ItemFlag.ItemIsUserCheckable)
-                cb.setCheckState(Qt.CheckState.Unchecked)
-                cb.setData(Qt.ItemDataRole.UserRole, book.id)
-                self._table.setItem(row, 0, cb)
 
-                title_item = QTableWidgetItem(book.display_title)
-                title_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                self._table.setItem(row, 1, title_item)
+                # Col 0 — checkbox
+                cb_item = QTableWidgetItem("")
+                cb_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                                 | Qt.ItemFlag.ItemIsUserCheckable)
+                cb_item.setCheckState(Qt.CheckState.Unchecked)
+                cb_item.setData(Qt.ItemDataRole.UserRole, book.id)
+                self._table.setItem(row, _COL_CB, cb_item)
 
-                author_item = QTableWidgetItem(book.display_author)
-                author_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                self._table.setItem(row, 2, author_item)
+                # Col 1 — titre
+                ti = QTableWidgetItem(book.display_title)
+                ti.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self._table.setItem(row, _COL_TITLE, ti)
 
-                dest_item = QTableWidgetItem("")
-                dest_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                self._table.setItem(row, 3, dest_item)
+                # Col 2 — auteur
+                ai = QTableWidgetItem(book.display_author)
+                ai.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self._table.setItem(row, _COL_AUTHOR, ai)
+
+                # Col 3 — M4B dispo
+                has_m4b = self._has_m4b(book)
+                m4b_item = QTableWidgetItem("✓" if has_m4b else "✗")
+                m4b_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                m4b_item.setForeground(QColor("#4caf50") if has_m4b else QColor("#f44336"))
+                m4b_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self._table.setItem(row, _COL_M4B, m4b_item)
+
+                # Col 4 — MP3 dispo
+                has_mp3 = self._has_mp3(book)
+                mp3_item = QTableWidgetItem("✓" if has_mp3 else "✗")
+                mp3_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                mp3_item.setForeground(QColor("#4caf50") if has_mp3 else QColor("#f44336"))
+                mp3_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self._table.setItem(row, _COL_MP3, mp3_item)
+
+                # Col 5 — destination prévue
+                di = QTableWidgetItem("")
+                di.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self._table.setItem(row, _COL_DEST, di)
         finally:
             self._populating = False
         self._fill_destination_column()
 
     def _sorted_filtered_books(self) -> List[BookEntry]:
-        query = self._search.text().lower().strip()
-        only_exist = self._only_existing_cb.isChecked()
+        query      = self._search.text().lower().strip()
+        f_m4b      = self._filter_m4b_btn.isChecked()
+        f_mp3      = self._filter_mp3_btn.isChecked()
 
         def _keep(b):
-            if only_exist and not (b.output_m4b_path
-                                   and os.path.exists(b.output_m4b_path)):
+            if f_m4b and not self._has_m4b(b):
+                return False
+            if f_mp3 and not self._has_mp3(b):
                 return False
             if query and query not in b.display_title.lower() \
                     and query not in b.display_author.lower():
@@ -414,8 +567,7 @@ class SceneCopyPanel(QWidget):
             return True
 
         return sorted([b for b in self._books if _keep(b)],
-                      key=lambda b: (b.display_author.lower(),
-                                     b.display_title.lower()))
+                      key=lambda b: (b.display_author.lower(), b.display_title.lower()))
 
     def _refresh_filter(self):
         self._fill_table()
@@ -425,7 +577,7 @@ class SceneCopyPanel(QWidget):
         try:
             state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
             for row in range(self._table.rowCount()):
-                it = self._table.item(row, 0)
+                it = self._table.item(row, _COL_CB)
                 if it:
                     it.setCheckState(state)
         finally:
@@ -433,7 +585,7 @@ class SceneCopyPanel(QWidget):
         self._update_status_lbl()
 
     def _on_item_changed(self, item: QTableWidgetItem):
-        if self._populating or item is None or item.column() != 0:
+        if self._populating or item is None or item.column() != _COL_CB:
             return
         self._update_status_lbl()
 
@@ -441,62 +593,70 @@ class SceneCopyPanel(QWidget):
         out = []
         by_id = {b.id: b for b in self._books}
         for row in range(self._table.rowCount()):
-            it = self._table.item(row, 0)
+            it = self._table.item(row, _COL_CB)
             if it and it.checkState() == Qt.CheckState.Checked:
-                bid = it.data(Qt.ItemDataRole.UserRole)
-                b = by_id.get(bid)
+                b = by_id.get(it.data(Qt.ItemDataRole.UserRole))
                 if b:
                     out.append(b)
         return out
 
     def _fill_destination_column(self):
-        """Met à jour la colonne 'Destination prévue' selon les templates courants."""
         for row in range(self._table.rowCount()):
-            cb = self._table.item(row, 0)
+            cb = self._table.item(row, _COL_CB)
             if not cb:
                 continue
-            bid = cb.data(Qt.ItemDataRole.UserRole)
-            book = next((b for b in self._books if b.id == bid), None)
-            dest_item = self._table.item(row, 3)
-            if dest_item is None or book is None:
+            book = next((b for b in self._books
+                         if b.id == cb.data(Qt.ItemDataRole.UserRole)), None)
+            di = self._table.item(row, _COL_DEST)
+            if di is None or book is None:
                 continue
-            rel = self._render_for(book)
-            dest_item.setText(rel)
-            if not (book.output_m4b_path and os.path.exists(book.output_m4b_path)):
-                dest_item.setForeground(QColor("#888"))
-                dest_item.setToolTip("M4B source absent — copie impossible")
+            rel = self._render_for(book, "M4B")
+            di.setText(rel)
+            if not self._has_export(book):
+                di.setForeground(QColor("#888"))
+                di.setToolTip("Aucun export disponible")
             else:
-                dest_item.setForeground(QColor("#cfcfcf"))
-                dest_item.setToolTip("")
+                di.setForeground(QColor("#cfcfcf"))
+                di.setToolTip("")
 
-    def _render_for(self, book: BookEntry) -> str:
-        ctx = _build_context(book,
-                             group=self._group_le.text().strip() or "HellTrucker",
-                             include_codec=self._codec_cb.isChecked(),
-                             include_bitrate=self._bitrate_cb.isChecked())
-        dir_part  = _render_path_template(self._dir_tpl_le.text(),  ctx)
-        file_part = _render_segment(self._file_tpl_le.text(), ctx)
-        if not file_part:
-            file_part = _clean(book.display_title) or "audiobook"
-        return os.path.join(dir_part, file_part + ".m4b") if dir_part else file_part + ".m4b"
+    def _render_for(self, book: BookEntry, fmt: str = "M4B") -> str:
+        group          = self._group_le.text().strip() or "HellTrucker"
+        include_codec  = self._codec_cb.isChecked()
+        include_bitrate = self._bitrate_cb.isChecked()
+        file_tpl       = self._file_tpl_le.text()
+        dir_tpl        = self._dir_tpl_le.text()
+
+        series_release, book_release = _compute_releases(
+            book, self._books, group, include_codec, include_bitrate, file_tpl, fmt)
+
+        is_integrale = bool(book.config.series and not book.config.volume)
+        stem = series_release if is_integrale else book_release
+        ext  = ".m4b" if fmt == "M4B" else ""
+
+        # Contexte complet : toutes les variables du template fichier + variables dossier
+        full_ctx = _build_context(book, self._books, group, include_codec, include_bitrate, fmt)
+        dir_ctx = {**full_ctx, "series_release": series_release, "book_release": book_release}
+        if fmt == "MP3":
+            dir_ctx["tag_album"] = stem
+        return os.path.join(_render_dir(dir_tpl, dir_ctx), stem + ext)
 
     def _update_preview(self):
-        sample_book = next(
-            (b for b in self._books
-             if b.output_m4b_path and os.path.exists(b.output_m4b_path)),
-            None) or (self._books[0] if self._books else None)
-        if sample_book is None:
+        sample = next((b for b in self._books if self._has_export(b)), None) \
+                 or (self._books[0] if self._books else None)
+        if sample is None:
             self._preview_lbl.setText("Aperçu : (aucun livre disponible)")
             return
-        rel = self._render_for(sample_book)
-        dest_root = self._dest_le.text().strip() or "<destination>"
-        self._preview_lbl.setText(
-            f"Aperçu — {sample_book.display_title}\n"
-            f"  → {os.path.join(dest_root, rel)}")
+        dest_m4b = self._dest_m4b_le.text().strip() or "<dest M4B>"
+        dest_mp3 = self._dest_mp3_le.text().strip() or "<dest MP3>"
+        lines = [f"Aperçu — {sample.display_title}"]
+        lines.append(f"  M4B → {os.path.join(dest_m4b, self._render_for(sample, 'M4B'))}")
+        lines.append(f"  MP3 → {os.path.join(dest_mp3, self._render_for(sample, 'MP3'))}")
+        self._preview_lbl.setText("\n".join(lines))
 
     def _update_status_lbl(self):
         n = sum(1 for r in range(self._table.rowCount())
-                if (it := self._table.item(r, 0)) and it.checkState() == Qt.CheckState.Checked)
+                if (it := self._table.item(r, _COL_CB))
+                and it.checkState() == Qt.CheckState.Checked)
         total = self._table.rowCount()
         self._status_lbl.setText(f"{n} sélectionné{'s' if n != 1 else ''} / {total}")
 
@@ -510,20 +670,23 @@ class SceneCopyPanel(QWidget):
             QMessageBox.information(self, "Aucun livre",
                                     "Cochez au moins un livre à copier.")
             return
-        dest_root = self._dest_le.text().strip()
-        if not dest_root:
+        dest_m4b = self._dest_m4b_le.text().strip()
+        dest_mp3 = self._dest_mp3_le.text().strip()
+        if not dest_m4b and not dest_mp3:
             QMessageBox.warning(self, "Destination requise",
-                                "Renseigne le dossier de copie d'abord.")
-            return
-        # Filtre les livres sans M4B source
-        valid = [b for b in books if b.output_m4b_path and os.path.exists(b.output_m4b_path)]
-        skipped = len(books) - len(valid)
-        if not valid:
-            QMessageBox.warning(self, "Aucune source disponible",
-                                "Les livres cochés n'ont pas de M4B existant.")
+                                "Renseigne au moins un dossier de destination.")
             return
 
-        os.makedirs(dest_root, exist_ok=True)
+        valid   = [b for b in books if self._has_export(b)]
+        skipped = len(books) - len(valid)
+        if not valid:
+            QMessageBox.warning(self, "Aucune source",
+                                "Les livres cochés n'ont aucun export disponible.")
+            return
+
+        for d in (dest_m4b, dest_mp3):
+            if d:
+                os.makedirs(d, exist_ok=True)
 
         self._copy_btn.setEnabled(False)
         bridge = _CopyBridge()
@@ -533,34 +696,97 @@ class SceneCopyPanel(QWidget):
 
         console = getattr(self.app, "console_panel", None)
         if console:
-            console.log(f"📋  Copie scène : {len(valid)} livre(s) → {dest_root}", "start")
+            console.log(f"📋  Copie scène : {len(valid)} livre(s)", "start")
+            if dest_m4b:
+                console.log(f"   M4B → {dest_m4b}", "info")
+            if dest_mp3:
+                console.log(f"   MP3 → {dest_mp3}", "info")
             if skipped:
-                console.log(f"   ({skipped} ignoré(s) — M4B source manquant)", "info")
+                console.log(f"   ({skipped} ignoré(s) — aucun export)", "info")
+
+        group           = self._group_le.text().strip() or "HellTrucker"
+        include_codec   = self._codec_cb.isChecked()
+        include_bitrate = self._bitrate_cb.isChecked()
+        dir_tpl         = self._dir_tpl_le.text()
+        file_tpl        = self._file_tpl_le.text()
+        all_books       = list(self._books)
 
         self._thread = threading.Thread(
-            target=self._copy_worker, args=(valid, dest_root, bridge), daemon=True)
+            target=self._copy_worker,
+            args=(valid, dest_m4b, dest_mp3, bridge,
+                  group, include_codec, include_bitrate, dir_tpl, file_tpl, all_books),
+            daemon=True)
         self._thread.start()
 
-    def _copy_worker(self, books: List[BookEntry], dest_root: str, bridge: _CopyBridge):
-        ok = 0
-        fail = 0
+    def _copy_worker(self, books: List[BookEntry],
+                     dest_m4b: str, dest_mp3: str,
+                     bridge: _CopyBridge,
+                     group: str, include_codec: bool, include_bitrate: bool,
+                     dir_tpl: str, file_tpl: str,
+                     all_books: List[BookEntry]):
+        from ..nfo import write_m4b_nfo, write_mp3_nfo
+        ok    = 0
+        fail  = 0
         errors: list = []
         copied_paths: list = []
         total = len(books)
-        for i, book in enumerate(books, start=1):
-            rel = self._render_for(book)
-            target = os.path.join(dest_root, rel)
-            bridge.progress.emit(i - 1, total, os.path.basename(target))
-            try:
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                shutil.copy2(book.output_m4b_path, target)
-                copied_paths.append(target)
-                ok += 1
-            except Exception as e:
-                fail += 1
-                errors.append(f"{book.display_title}: {e}")
 
-        # Les fichiers copiés ne doivent jamais être redétectés comme nouveaux livres
+        def get_paths(book: BookEntry, fmt: str):
+            series_rel, book_rel = _compute_releases(
+                book, all_books, group, include_codec, include_bitrate, file_tpl, fmt)
+            is_integrale = bool(book.config.series and not book.config.volume)
+            stem = series_rel if is_integrale else book_rel
+            full_ctx = _build_context(book, all_books, group, include_codec, include_bitrate, fmt)
+            dir_ctx = {**full_ctx, "series_release": series_rel, "book_release": book_rel}
+            if fmt == "MP3":
+                dir_ctx["tag_album"] = stem
+            return _render_dir(dir_tpl, dir_ctx), stem, series_rel
+
+        # Copie livre par livre
+        for i, book in enumerate(books, start=1):
+            bridge.progress.emit(i - 1, total, book.display_title)
+
+            # M4B
+            if dest_m4b and book.output_m4b_path and os.path.exists(book.output_m4b_path):
+                folder, stem, _ = get_paths(book, "M4B")
+                target = os.path.join(dest_m4b, folder, stem + ".m4b")
+                try:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    shutil.copy2(book.output_m4b_path, target)
+                    copied_paths.append(target)
+                    try:
+                        write_m4b_nfo(book, target)
+                    except Exception as e:
+                        errors.append(f"{book.display_title} (NFO M4B): {e}")
+                    ok += 1
+                except Exception as e:
+                    fail += 1
+                    errors.append(f"{book.display_title} (M4B): {e}")
+
+            # MP3
+            if dest_mp3 and book.output_mp3_dir and os.path.isdir(book.output_mp3_dir):
+                folder, stem, _ = get_paths(book, "MP3")
+                book_folder = os.path.join(dest_mp3, folder)
+                try:
+                    os.makedirs(book_folder, exist_ok=True)
+                    mp3_files = [f for f in os.listdir(book.output_mp3_dir)
+                                 if f.lower().endswith(".mp3")]
+                    for fname in mp3_files:
+                        shutil.copy2(os.path.join(book.output_mp3_dir, fname),
+                                     os.path.join(book_folder, fname))
+                    nfo_path = os.path.join(book_folder, stem + ".nfo")
+                    try:
+                        write_mp3_nfo(book, nfo_path, book.output_mp3_dir)
+                    except Exception as e:
+                        errors.append(f"{book.display_title} (NFO MP3): {e}")
+                    if mp3_files:
+                        ok += 1
+                    else:
+                        errors.append(f"{book.display_title} (MP3): dossier source vide")
+                except Exception as e:
+                    fail += 1
+                    errors.append(f"{book.display_title} (MP3): {e}")
+
         if copied_paths:
             self.app.config_manager.add_ignore_paths(copied_paths)
 

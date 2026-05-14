@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
@@ -21,11 +22,16 @@ class FolderConfig:
 
 DEFAULT_METADATA_REQUIRED = ["title", "author", "narrator", "year", "asin", "cover_path"]
 
-DEFAULT_SCENE_COPY_DIR_TEMPLATE  = (
-    "{author}/{series}/{volume}/"
-    "{author}.{title}.{lang}.{format}.{codec}.{bitrate}-{group}"
+# Template dossier : {author_raw} = auteur brut, {series_release} = nom calculé du dossier série,
+# {book_release} = nom calculé du dossier livre. Les segments vides sont supprimés.
+DEFAULT_SCENE_COPY_DIR_TEMPLATE = "{author_raw}/{series_raw}/{tag_album}"
+
+# Template fichier : contrôle le nom de release (dossier livre ET nom de fichier).
+# Le même template est appliqué deux fois : une fois pour le dossier série (volume/title vides,
+# integrale="Integrale"), une fois pour le livre (valeurs réelles).
+DEFAULT_SCENE_COPY_FILE_TEMPLATE = (
+    "{author}.{series}.{volume}.{integrale}.{title}.{year}.{lang}.{format}.{bitrate}.{codec}-{group}"
 )
-DEFAULT_SCENE_COPY_FILE_TEMPLATE = "{author}.{title}.{lang}.{format}.{codec}.{bitrate}-{group}"
 
 
 @dataclass
@@ -38,7 +44,8 @@ class AppConfig:
     naming_style: str = "perso"   # "perso" | "scene"
     metadata_required_fields: List[str] = field(
         default_factory=lambda: list(DEFAULT_METADATA_REQUIRED))
-    scene_copy_dest: str = ""
+    scene_copy_dest_m4b: str = ""
+    scene_copy_dest_mp3: str = ""
     scene_copy_dir_template: str = DEFAULT_SCENE_COPY_DIR_TEMPLATE
     scene_copy_file_template: str = DEFAULT_SCENE_COPY_FILE_TEMPLATE
     scene_copy_include_codec: bool = True
@@ -49,11 +56,12 @@ class AppConfig:
 
 
 def _sort_key(s: str) -> str:
-    """Clé de tri alphanumérique insensible à la casse et aux accents."""
-    return "".join(
+    """Clé de tri naturel : insensible à la casse/accents, nombres triés numériquement."""
+    normalized = "".join(
         c for c in unicodedata.normalize("NFD", s.casefold())
         if unicodedata.category(c) != "Mn"
     )
+    return re.sub(r'\d+', lambda m: m.group().zfill(10), normalized)
 
 
 class ConfigManager:
@@ -87,7 +95,9 @@ class ConfigManager:
                 naming_style=data.get("naming_style", "perso"),
                 metadata_required_fields=data.get(
                     "metadata_required_fields", list(DEFAULT_METADATA_REQUIRED)),
-                scene_copy_dest=data.get("scene_copy_dest", ""),
+                scene_copy_dest_m4b=data.get("scene_copy_dest_m4b",
+                                            data.get("scene_copy_dest", "")),
+                scene_copy_dest_mp3=data.get("scene_copy_dest_mp3", ""),
                 scene_copy_dir_template=data.get(
                     "scene_copy_dir_template", DEFAULT_SCENE_COPY_DIR_TEMPLATE),
                 scene_copy_file_template=data.get(
@@ -120,7 +130,8 @@ class ConfigManager:
             "font_path": self.app_config.font_path,
             "naming_style": self.app_config.naming_style,
             "metadata_required_fields": self.app_config.metadata_required_fields,
-            "scene_copy_dest": self.app_config.scene_copy_dest,
+            "scene_copy_dest_m4b": self.app_config.scene_copy_dest_m4b,
+            "scene_copy_dest_mp3": self.app_config.scene_copy_dest_mp3,
             "scene_copy_dir_template": self.app_config.scene_copy_dir_template,
             "scene_copy_file_template": self.app_config.scene_copy_file_template,
             "scene_copy_include_codec": self.app_config.scene_copy_include_codec,

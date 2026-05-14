@@ -173,6 +173,8 @@ def _analyze_folder_source(folder_path: str, folder_label: str) -> Optional[Audi
         sample_rate_hz = 0
 
     channels = audio_stream.get("channels", 0)
+    stream_br = audio_stream.get("bit_rate")
+    vbr = not stream_br or str(stream_br) in ("N/A", "0")
 
     total_size = 0
     total_duration = 0.0
@@ -206,6 +208,7 @@ def _analyze_folder_source(folder_path: str, folder_label: str) -> Optional[Audi
         tag_artist=artist,
         tag_performer=performer,
         tag_asin=tags.get("asin", ""),
+        vbr=vbr,
     )
 
 
@@ -239,6 +242,8 @@ def _analyze_m4b_source(file_path: str, folder_label: str) -> Optional[AudioInfo
     except (ValueError, TypeError):
         duration_s = 0.0
 
+    stream_br = audio_stream.get("bit_rate")
+    vbr = not stream_br or str(stream_br) in ("N/A", "0")
     size_mb = round(os.path.getsize(file_path) / (1024 * 1024), 1)
     artist = tags.get("artist", tags.get("album_artist", ""))
     performer = tags.get("performer", "")
@@ -258,6 +263,7 @@ def _analyze_m4b_source(file_path: str, folder_label: str) -> Optional[AudioInfo
         tag_artist=artist,
         tag_performer=performer,
         tag_asin=tags.get("asin", ""),
+        vbr=vbr,
     )
 
 

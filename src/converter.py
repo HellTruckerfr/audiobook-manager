@@ -11,6 +11,7 @@ _BELOW_NORMAL = 0x00004000 if sys.platform == "win32" else 0
 
 from .models import BookEntry, Chapter, AudioInfo
 from .config_manager import ConfigManager
+from .normalizer import normalize_chapter_title
 
 
 _CHAPTER_WORD = {
@@ -66,8 +67,6 @@ def _write_ffmeta(path: str, config, chapters: List[Chapter]):
         lines.append(f"publisher={config.publisher}\n")
     if config.asin:
         lines.append(f"ASIN={config.asin}\n")
-    if config.encoded_by:
-        lines.append(f"encoded_by={config.encoded_by}\n")
     if config.copyright:
         lines.append(f"copyright={config.copyright}\n")
     if config.description:
@@ -81,7 +80,14 @@ def _write_ffmeta(path: str, config, chapters: List[Chapter]):
         lines.append("TIMEBASE=1/1000\n")
         lines.append(f"START={cum_ms}\n")
         lines.append(f"END={cum_ms + dur_ms}\n")
-        lines.append(f"title={_localize_chapter(ch.title, lang)}\n")
+        ts = getattr(config, "title_source", "detected")
+        if ts == "normalized":
+            ch_title = normalize_chapter_title(ch.detected_title)
+        elif ts == "custom":
+            ch_title = ch.custom_title or ch.detected_title
+        else:
+            ch_title = ch.detected_title
+        lines.append(f"title={_localize_chapter(ch_title, lang)}\n")
         cum_ms += dur_ms
 
     with open(path, "w", encoding=utf8, newline="\n") as f:
@@ -115,8 +121,6 @@ def _write_ffmeta_tags(path: str, config) -> None:
         lines.append(f"publisher={config.publisher}\n")
     if config.asin:
         lines.append(f"ASIN={config.asin}\n")
-    if config.encoded_by:
-        lines.append(f"encoded_by={config.encoded_by}\n")
     if config.copyright:
         lines.append(f"copyright={config.copyright}\n")
     if config.description:
@@ -201,6 +205,15 @@ def _best_aac_encoder() -> str:
     return _aac_encoder_cache
 
 
+def _aac_quality_args(enc: str, config) -> list:
+    """CBR pour tous les encodeurs (libfdk_aac inclus) — respect du standard scène 128k."""
+    return ["-b:a", config.bitrate]
+
+
+def _aac_quality_label(enc: str, config) -> str:
+    return f"CBR {config.bitrate}"
+
+
 _PROGRESS_PREFIXES = frozenset([
     "frame=", "fps=", "stream_", "bitrate=", "total_size=",
     "out_time_us=", "out_time_ms=", "dup_frames=", "drop_frames=",
@@ -222,9 +235,25 @@ class Converter:
     def __init__(self, config_manager: ConfigManager):
         self.cfg = config_manager
         self._cancel_flag = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._cleanup_stale_tmp()
+
+    def _cleanup_stale_tmp(self):
+        import shutil
+        tmp_dir = tempfile.gettempdir()
+        try:
+            for entry in os.scandir(tmp_dir):
+                if entry.is_dir() and entry.name.startswith("abm_"):
+                    shutil.rmtree(entry.path, ignore_errors=True)
+        except OSError:
+            pass
 
     def cancel(self):
         self._cancel_flag.set()
+
+    def join(self, timeout: float = 15.0):
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
 
     def reset_cancel(self):
         self._cancel_flag.clear()
@@ -239,19 +268,21 @@ class Converter:
     ):
         """Run M4B conversion in a background thread."""
         self.reset_cancel()
-        threading.Thread(
+        self._thread = threading.Thread(
             target=self._run,
             args=(book, output_path, progress_cb, done_cb, log_cb),
             daemon=True,
-        ).start()
+        )
+        self._thread.start()
 
     def update_metadata(self, book, progress_cb, done_cb, log_cb=None):
         """Réécrit les tags d'un M4B existant sans ré-encodage audio."""
-        threading.Thread(
+        self._thread = threading.Thread(
             target=self._run_update_metadata,
             args=(book, progress_cb, done_cb, log_cb),
             daemon=True,
-        ).start()
+        )
+        self._thread.start()
 
     def _run_update_metadata(self, book, progress_cb, done_cb, log_cb=None):
         import tempfile, shutil
@@ -325,11 +356,12 @@ class Converter:
     ):
         """Split M4B → dossier de MP3 (un fichier par chapitre), en background."""
         self.reset_cancel()
-        threading.Thread(
+        self._thread = threading.Thread(
             target=self._run_mp3,
             args=(book, output_dir, progress_cb, done_cb, log_cb),
             daemon=True,
-        ).start()
+        )
+        self._thread.start()
 
     def _run_mp3(self, book, output_dir, progress_cb, done_cb, log_cb):
         import concurrent.futures
@@ -640,7 +672,7 @@ class Converter:
                      "-metadata:s:a:0", f"language={lang}", "-sn"]
             if cover and os.path.exists(cover):
                 args += ["-map", "2:0", "-c:v", "copy", "-disposition:v:0", "attached_pic"]
-            args += ["-c:a", preferred_enc, "-b:a", config.bitrate,
+            args += ["-c:a", preferred_enc] + _aac_quality_args(preferred_enc, config) + [
                      "-ac", "2", "-ar", config.sample_rate, "-y", p(out)]
             return self._run_ffmpeg(args, total_dur, progress_cb, log_cb)
 
@@ -665,7 +697,7 @@ class Converter:
             if duration is not None:
                 args += ["-t", str(duration)]
             args += ["-map", "0:a:0",
-                     "-c:a", preferred_enc, "-b:a", config.bitrate,
+                     "-c:a", preferred_enc] + _aac_quality_args(preferred_enc, config) + [
                      "-ac", "2", "-ar", config.sample_rate,
                      "-threads", "1", "-y", p(part)]
             timed_out = False
@@ -762,7 +794,8 @@ class Converter:
 
         if n > 1:
             if log_cb:
-                log_cb(f"   Mode    : encodage parallèle {_best_aac_encoder()} @ {config.bitrate} ({n} fichiers)", "detail")
+                _enc = _best_aac_encoder()
+                log_cb(f"   Mode    : encodage parallèle {_enc} {_aac_quality_label(_enc, config)} ({n} fichiers)", "detail")
             return self._encode_parallel(
                 files, meta, cover, out, config, total_dur, tmp, progress_cb, log_cb, copy_aac
             )
@@ -779,13 +812,14 @@ class Converter:
         if cover_idx >= 0:
             args += ["-map", f"{cover_idx}:0", "-c:v", "copy",
                      "-disposition:v:0", "attached_pic"]
-        args += ["-c:a", "copy"] if can_copy else [
-            "-c:a", _best_aac_encoder(), "-b:a", config.bitrate,
-            "-ac", "2", "-ar", config.sample_rate,
-        ]
+        if can_copy:
+            args += ["-c:a", "copy"]
+        else:
+            _enc = _best_aac_encoder()
+            args += ["-c:a", _enc] + _aac_quality_args(_enc, config) + ["-ac", "2", "-ar", config.sample_rate]
         if log_cb:
-            _enc = "copie directe" if can_copy else f"encodage {_best_aac_encoder()} @ {config.bitrate}"
-            log_cb(f"   Mode    : {_enc} (1 fichier)", "detail")
+            _enc_label = "copie directe" if can_copy else f"encodage {_best_aac_encoder()} {_aac_quality_label(_best_aac_encoder(), config)}"
+            log_cb(f"   Mode    : {_enc_label} (1 fichier)", "detail")
         args += ["-y", p(out)]
         return self._run_ffmpeg(args, total_dur, progress_cb, log_cb)
 
@@ -817,9 +851,9 @@ class Converter:
             if ext in aac_exts and copy_aac:
                 candidates = [["-map", "0:a:0", "-c:a", "copy"]]
             else:
-                base_enc = ["-map", "0:a:0",
-                            "-c:a", preferred_enc, "-b:a", config.bitrate,
-                            "-ac", "2", "-ar", config.sample_rate]
+                base_enc = (["-map", "0:a:0", "-c:a", preferred_enc]
+                            + _aac_quality_args(preferred_enc, config)
+                            + ["-ac", "2", "-ar", config.sample_rate])
                 candidates = [base_enc]
                 if preferred_enc != "aac":
                     candidates.append(["-map", "0:a:0",

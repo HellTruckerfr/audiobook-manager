@@ -1,4 +1,5 @@
 import re
+import http.client
 import urllib.request
 import urllib.error
 
@@ -28,7 +29,7 @@ def _fetch_raw(asin: str, region: str) -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return _decode(resp.read())
-    except (urllib.error.URLError, OSError):
+    except (urllib.error.URLError, OSError, http.client.IncompleteRead):
         return None
 
 
@@ -37,6 +38,8 @@ _STRIP_PATTERNS = [
     re.compile(r">>?\s*Ce livre audio[^.]*disponible en téléchargement\.?", re.IGNORECASE),
     # "Illustration de couverture : © 2011 HBO ..." (mention légale sur la cover)
     re.compile(r"Illustration de couverture\s*:.*", re.IGNORECASE | re.DOTALL),
+    # "Lorsque vous achetez ce titre, le fichier PDF ..."
+    re.compile(r"Lorsque vous achetez ce titre[^.]*\.", re.IGNORECASE),
 ]
 
 

@@ -77,6 +77,7 @@ class AudiobookManagerApp:
         self.window.show()
         self._set_dark_titlebar()
         self._auto_load_library()
+        self._qt_app.aboutToQuit.connect(self._on_app_quit)
 
     # ── Thème ──────────────────────────────────────────────────────────────
 
@@ -501,6 +502,10 @@ class AudiobookManagerApp:
         """Ajoute un job de mise à jour des tags M4B à la file."""
         self.queue_panel.add_job(book, job_type="meta")
         self._show_page("queue")
+
+    def _on_app_quit(self):
+        self.converter.cancel()
+        self.converter.join(timeout=15.0)
 
     def run(self):
         sys.exit(self._qt_app.exec())

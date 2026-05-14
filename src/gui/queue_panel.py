@@ -110,10 +110,11 @@ class QueuePanel(QWidget):
         ctrl.addWidget(self._btn_start)
 
         self._fmt_combo = QComboBox()
-        self._fmt_combo.addItems(["M4B", "MP3"])
-        self._fmt_combo.setFixedWidth(68)
+        self._fmt_combo.addItems(["M4B", "MP3", "Méta"])
+        self._fmt_combo.setFixedWidth(76)
         self._fmt_combo.setToolTip(
             "Format de conversion pour tous les jobs en attente.\n"
+            "Méta = mise à jour des tags M4B sans réencodage.\n"
             "Changer ici met à jour l'ensemble de la file.")
         self._fmt_combo.setStyleSheet("""
             QComboBox {
@@ -209,9 +210,11 @@ class QueuePanel(QWidget):
 
     # ── Public API ─────────────────────────────────────────────────────
 
+    _FMT_MAP = {"m4b": "m4b", "mp3": "mp3", "méta": "meta"}
+
     def add_job(self, book: BookEntry, job_type: str = "m4b"):
-        fmt = self._fmt_combo.currentText().lower()
-        # job_type explicite (ex: add_mp3_export) prime sur la combo globale
+        fmt = self._FMT_MAP.get(self._fmt_combo.currentText().lower(), "m4b")
+        # job_type explicite (ex: "mp3", "meta") prime sur la combo globale
         effective_type = job_type if job_type != "m4b" else fmt
         for j in self._jobs:
             if j.book.id == book.id and j.status == "queued" and j.job_type == effective_type:
@@ -247,7 +250,7 @@ class QueuePanel(QWidget):
     # ── Format global ──────────────────────────────────────────────────
 
     def _on_format_changed(self, text: str):
-        fmt = text.lower()
+        fmt = self._FMT_MAP.get(text.lower(), "m4b")
         for job in self._jobs:
             if job.status == "queued":
                 job.job_type = fmt

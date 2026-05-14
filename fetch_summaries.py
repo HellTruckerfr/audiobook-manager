@@ -12,9 +12,16 @@ Options :
 """
 import sys
 import os
+import io
+import re
 import json
 import time
 import argparse
+
+# Force UTF-8 sur le terminal Windows (évite les UnicodeEncodeError sur les accents)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.fetcher import fetch_amazon_meta
@@ -23,6 +30,7 @@ from src.fetcher import fetch_amazon_meta
 LIBRARY_PATH = os.path.join(os.path.dirname(__file__), "library.json")
 DELAY_S      = 2.5   # délai entre requêtes pour ne pas se faire bloquer
 REGION       = "fr"
+_ASIN_RE     = re.compile(r"^B[A-Z0-9]{9}$")
 
 
 def main():
@@ -39,7 +47,11 @@ def main():
         cfg  = book.get("config", {})
         asin = cfg.get("asin", "").strip()
         desc = cfg.get("description", "").strip()
-        if asin and (args.force or not desc):
+        if not _ASIN_RE.match(asin):
+            if asin:
+                print(f"  ⚠  ASIN invalide ignoré : {key!r} → {asin!r}")
+            continue
+        if args.force or not desc:
             to_fetch.append((key, asin, cfg.get("title", key)))
 
     total = len(to_fetch)

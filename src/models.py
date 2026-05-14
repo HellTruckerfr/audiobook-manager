@@ -11,13 +11,14 @@ class AudioInfo:
     sample_rate_hz: int
     channels: int
     duration_s: float
-    size_mb: float
+    size_mb: float        # stored as MiB (bytes / 1024²) despite the name
     file_count: int = 1
     tag_title: str = ""
     tag_album: str = ""
     tag_artist: str = ""
     tag_performer: str = ""
     tag_asin: str = ""
+    vbr: Optional[bool] = None   # True=VBR, False=CBR, None=unknown
 
     @property
     def channels_label(self) -> str:
@@ -47,6 +48,7 @@ class AudioInfo:
             "tag_artist": self.tag_artist,
             "tag_performer": self.tag_performer,
             "tag_asin": self.tag_asin,
+            "vbr": self.vbr,
         }
 
     @classmethod
@@ -66,6 +68,7 @@ class AudioInfo:
             tag_artist=d.get("tag_artist", ""),
             tag_performer=d.get("tag_performer", ""),
             tag_asin=d.get("tag_asin", ""),
+            vbr=d.get("vbr"),
         )
 
 
@@ -113,7 +116,6 @@ class BookConfig:
     language: str = "FR"
     asin: str = ""
     publisher: str = ""
-    encoded_by: str = "HellTrucker"
     bitrate: str = "128k"
     sample_rate: str = "44100"
     watermark: bool = True
@@ -122,6 +124,7 @@ class BookConfig:
     copyright: str = ""
     selected_source_label: str = ""
     ignore_metadata_check: bool = False
+    title_source: str = "detected"   # "detected" | "normalized" | "custom"
     chapter_custom_titles: Dict[int, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -136,7 +139,6 @@ class BookConfig:
             "language": self.language,
             "asin": self.asin,
             "publisher": self.publisher,
-            "encoded_by": self.encoded_by,
             "bitrate": self.bitrate,
             "sample_rate": self.sample_rate,
             "watermark": self.watermark,
@@ -145,6 +147,7 @@ class BookConfig:
             "copyright": self.copyright,
             "selected_source_label": self.selected_source_label,
             "ignore_metadata_check": self.ignore_metadata_check,
+            "title_source": self.title_source,
             "chapter_custom_titles": {str(k): v for k, v in self.chapter_custom_titles.items()},
         }
 
@@ -162,7 +165,6 @@ class BookConfig:
             language=d.get("language", "FR"),
             asin=d.get("asin", ""),
             publisher=d.get("publisher", ""),
-            encoded_by=d.get("encoded_by", "HellTrucker"),
             bitrate=d.get("bitrate", "128k"),
             sample_rate=d.get("sample_rate", "44100"),
             watermark=d.get("watermark", False),
@@ -171,6 +173,7 @@ class BookConfig:
             copyright=d.get("copyright", ""),
             selected_source_label=d.get("selected_source_label", ""),
             ignore_metadata_check=d.get("ignore_metadata_check", False),
+            title_source=d.get("title_source", "detected"),
             chapter_custom_titles=titles,
         )
 
