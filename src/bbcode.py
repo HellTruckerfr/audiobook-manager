@@ -1,3 +1,4 @@
+import re
 from .models import BookEntry, AudioInfo
 
 
@@ -71,3 +72,47 @@ def generate_prez(book: BookEntry, tracker_name: str = "La Cale",
 
     lines += ["", f"[i]Généré par {tracker_name}[/i][/center]"]
     return "\n".join(lines)
+
+
+# ── BBCode → HTML (preview) ───────────────────────────────────────────────
+
+_HTML_CSS = """
+body {
+    background: #1e1e1e; color: #ddd;
+    font-family: "Segoe UI", sans-serif; font-size: 10pt;
+    padding: 24px; line-height: 1.6; margin: 0;
+}
+blockquote {
+    background: #252525; border-left: 3px solid #555;
+    padding: 10px 16px; margin: 8px 0; color: #bbb; font-style: italic;
+}
+b { color: #f3f3f3; }
+img { border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.6);
+      max-width: 220px; max-height: 320px; }
+"""
+
+_CONVERSIONS = [
+    (re.compile(r'\[b\](.*?)\[/b\]',           re.DOTALL), r'<b>\1</b>'),
+    (re.compile(r'\[i\](.*?)\[/i\]',           re.DOTALL), r'<i>\1</i>'),
+    (re.compile(r'\[color=([^\]]+)\](.*?)\[/color\]', re.DOTALL),
+     r'<span style="color:\1">\2</span>'),
+    (re.compile(r'\[size=(\d+)\](.*?)\[/size\]', re.DOTALL),
+     lambda m: f'<span style="font-size:{int(m.group(1)) * 4}px">{m.group(2)}</span>'),
+    (re.compile(r'\[img\](.*?)\[/img\]',        re.DOTALL),
+     r'<img src="\1">'),
+    (re.compile(r'\[quote\](.*?)\[/quote\]',    re.DOTALL),
+     r'<blockquote>\1</blockquote>'),
+    (re.compile(r'\[center\](.*?)\[/center\]',  re.DOTALL),
+     r'<div style="text-align:center">\1</div>'),
+]
+
+
+def bbcode_to_html(bbcode: str) -> str:
+    t = bbcode
+    for pattern, repl in _CONVERSIONS:
+        t = pattern.sub(repl, t)
+    t = t.replace('\n', '<br>\n')
+    return (
+        f'<!DOCTYPE html><html><head><meta charset="utf-8">'
+        f'<style>{_HTML_CSS}</style></head><body>{t}</body></html>'
+    )

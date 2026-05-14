@@ -1,15 +1,54 @@
+import urllib.request
 from typing import List, Optional
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTabWidget,
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QTextEdit, QFrame,
+    QTextEdit, QFrame, QTextBrowser,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import Qt, QUrl, QThread, pyqtSignal
+from PyQt6.QtGui import QGuiApplication, QPixmap, QTextDocument
 
 from ..models import BookEntry
-from ..bbcode import generate_prez
+from ..bbcode import generate_prez, bbcode_to_html
+
+
+class _ImageLoader(QThread):
+    """Télécharge une image distante en arrière-plan et renvoie ses bytes."""
+    done = pyqtSignal(bytes)
+
+    def __init__(self, url: str):
+        super().__init__()
+        self._url = url
+
+    def run(self):
+        try:
+            with urllib.request.urlopen(self._url, timeout=8) as r:
+                self.done.emit(r.read())
+        except Exception:
+            self.done.emit(b"")
+
+
+class _PreviewBrowser(QTextBrowser):
+    """QTextBrowser qui charge les images http(s) via urllib."""
+
+    def loadResource(self, resource_type: int, url: QUrl):
+        if resource_type == QTextDocument.ResourceType.ImageResource.value:
+            scheme = url.scheme()
+            if scheme in ("http", "https"):
+                try:
+                    req = urllib.request.Request(
+                        url.toString(),
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+                    with urllib.request.urlopen(req, timeout=8) as r:
+                        data = r.read()
+                    pix = QPixmap()
+                    pix.loadFromData(data)
+                    return pix
+                except Exception:
+                    pass
+        return super().loadResource(resource_type, url)
 
 
 class PrezPanel(QWidget):
@@ -76,12 +115,12 @@ class PrezPanel(QWidget):
         sep.setStyleSheet("color: #333;")
         layout.addWidget(sep)
 
-        # Splitter
+        # Splitter principal
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet("QSplitter::handle { background: #333; }")
 
-        # Left: book list
+        # ── Gauche : liste de livres ──
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(6, 6, 6, 6)
@@ -92,25 +131,44 @@ class PrezPanel(QWidget):
         ll.addWidget(self._list, 1)
         splitter.addWidget(left)
 
-        # Right: BBCode output
+        # ── Droite : onglets BBCode / Aperçu ──
         right = QWidget()
         rl = QVBoxLayout(right)
         rl.setContentsMargins(6, 6, 6, 6)
         rl.setSpacing(4)
-        rl.addWidget(QLabel("BBCode généré"))
+
+        tabs = QTabWidget()
+        tabs.setStyleSheet("""
+            QTabBar::tab { padding: 5px 14px; }
+            QTabBar::tab:selected { color: white; }
+        """)
+
+        # Onglet BBCode
         self._bbcode_edit = QTextEdit()
         self._bbcode_edit.setReadOnly(True)
         self._bbcode_edit.setStyleSheet(
             "QTextEdit { font-family: Consolas, monospace; font-size: 9pt;"
-            " background: #1a1a1a; color: #ddd; border: 1px solid #333; }")
-        rl.addWidget(self._bbcode_edit, 1)
+            " background: #1a1a1a; color: #ddd; border: none; }")
+        tabs.addTab(self._bbcode_edit, "BBCode")
+
+        # Onglet Aperçu
+        self._preview = _PreviewBrowser()
+        self._preview.setOpenLinks(False)
+        self._preview.setStyleSheet(
+            "QTextBrowser { background: #1e1e1e; border: none; }")
+        tabs.addTab(self._preview, "Aperçu")
+
+        tabs.currentChanged.connect(self._on_tab_changed)
+        self._tabs = tabs
+
+        rl.addWidget(tabs, 1)
 
         self._warn_lbl = QLabel("")
         self._warn_lbl.setStyleSheet("color: #e8a020; font-size: 8.5pt;")
         self._warn_lbl.setWordWrap(True)
         rl.addWidget(self._warn_lbl)
-        splitter.addWidget(right)
 
+        splitter.addWidget(right)
         splitter.setSizes([280, 900])
         layout.addWidget(splitter, 1)
 
@@ -133,7 +191,6 @@ class PrezPanel(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, book.id)
             self._list.addItem(item)
         self._list.blockSignals(False)
-        # Restore selection
         if prev_id:
             for i in range(self._list.count()):
                 if self._list.item(i).data(Qt.ItemDataRole.UserRole) == prev_id:
@@ -146,6 +203,7 @@ class PrezPanel(QWidget):
         if row < 0 or row >= len(self._books):
             self._current = None
             self._bbcode_edit.clear()
+            self._preview.clear()
             return
         self._current = self._books[row]
         self._cover_url_le.blockSignals(True)
@@ -162,19 +220,34 @@ class PrezPanel(QWidget):
     def _regenerate(self):
         if not self._current:
             self._bbcode_edit.clear()
+            self._preview.clear()
             return
         tracker = self.app.config_manager.app_config.tracker_name or "La Cale"
         rating  = self._rating_le.text().strip()
         bbcode  = generate_prez(self._current, tracker_name=tracker, rating=rating)
         self._bbcode_edit.setPlainText(bbcode)
 
+        if self._tabs.currentIndex() == 1:
+            self._update_preview(bbcode)
+
         warn = []
         if not self._current.config.cover_url:
             warn.append("⚠ Pas d'URL de cover — renseignez-la ci-dessus.")
         if not self._current.output_m4b_info:
-            warn.append("⚠ Pas d'infos M4B — codec/bitrate/taille omis (scannez après conversion).")
+            warn.append("⚠ Pas d'infos M4B — codec/bitrate/taille omis.")
         self._warn_lbl.setText("  ".join(warn))
         self._status_lbl.setText("")
+
+    def _on_tab_changed(self, index: int):
+        if index == 1:
+            self._update_preview(self._bbcode_edit.toPlainText())
+
+    def _update_preview(self, bbcode: str):
+        if not bbcode:
+            self._preview.clear()
+            return
+        html = bbcode_to_html(bbcode)
+        self._preview.setHtml(html)
 
     def _copy(self):
         text = self._bbcode_edit.toPlainText()
