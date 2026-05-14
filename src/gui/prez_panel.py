@@ -1,4 +1,6 @@
+import copy as _copy
 import os
+import re
 import urllib.request
 from typing import List, Optional
 
@@ -234,11 +236,71 @@ class PrezPanel(QWidget):
     # ── Public API ────────────────────────────────────────────────────
 
     def refresh_books(self):
+        all_books = list(self.app.scanner.load_last_books() or [])
+        self._detect_scene_copies(all_books)
         self._books = [
-            b for b in (self.app.scanner.load_last_books() or [])
-            if b.output_m4b_info is not None or b.output_mp3_info is not None
+            b for b in all_books
+            if b.config.scene_m4b_path or b.config.scene_mp3_path
         ]
         self._fill_list()
+
+    # ── Détection automatique des copies scène ────────────────────────
+
+    def _detect_scene_copies(self, books: list):
+        """Scanne les dossiers scène et remplit scene_m4b_path / scene_mp3_path
+        pour les livres qui n'ont pas encore ces chemins enregistrés."""
+        cfg = self.app.config_manager.app_config
+
+        # Index M4B : taille exacte (bytes) → chemin
+        m4b_by_size: dict = {}
+        if cfg.scene_copy_dest_m4b and os.path.isdir(cfg.scene_copy_dest_m4b):
+            for root, _, files in os.walk(cfg.scene_copy_dest_m4b):
+                for f in files:
+                    if f.lower().endswith(".m4b"):
+                        fpath = os.path.join(root, f)
+                        try:
+                            m4b_by_size[os.path.getsize(fpath)] = fpath
+                        except OSError:
+                            pass
+
+        # Index MP3 : ASIN trouvé dans les NFO → dossier
+        mp3_by_asin: dict = {}
+        if cfg.scene_copy_dest_mp3 and os.path.isdir(cfg.scene_copy_dest_mp3):
+            for root, _, files in os.walk(cfg.scene_copy_dest_mp3):
+                for f in files:
+                    if f.lower().endswith(".nfo"):
+                        try:
+                            with open(os.path.join(root, f),
+                                      encoding="utf-8", errors="ignore") as fh:
+                                content = fh.read()
+                            m = re.search(r'ASIN\s*[:\-]\s*(\S+)', content)
+                            if m:
+                                mp3_by_asin[m.group(1).strip()] = root
+                        except OSError:
+                            pass
+
+        for book in books:
+            changed = False
+
+            # Détection M4B par taille exacte
+            if not book.config.scene_m4b_path and book.output_m4b_path:
+                if os.path.isfile(book.output_m4b_path):
+                    try:
+                        sz = os.path.getsize(book.output_m4b_path)
+                        if sz in m4b_by_size:
+                            book.config.scene_m4b_path = m4b_by_size[sz]
+                            changed = True
+                    except OSError:
+                        pass
+
+            # Détection MP3 par ASIN dans le NFO
+            if not book.config.scene_mp3_path and book.config.asin:
+                if book.config.asin in mp3_by_asin:
+                    book.config.scene_mp3_path = mp3_by_asin[book.config.asin]
+                    changed = True
+
+            if changed:
+                self.app.config_manager.save_book(book)
 
     # ── Internals ─────────────────────────────────────────────────────
 
@@ -250,9 +312,9 @@ class PrezPanel(QWidget):
             author = book.display_author or "?"
             title  = book.display_title  or "?"
             flags  = []
-            if book.output_m4b_info:
+            if book.config.scene_m4b_path:
                 flags.append("M4B")
-            if book.output_mp3_info:
+            if book.config.scene_mp3_path:
                 flags.append("MP3")
             badge = f"  [{'/'.join(flags)}]" if flags else ""
             item = QListWidgetItem(f"{author} — {title}{badge}")
@@ -277,11 +339,13 @@ class PrezPanel(QWidget):
         self._cover_url_le.blockSignals(True)
         self._cover_url_le.setText(self._current.config.cover_url)
         self._cover_url_le.blockSignals(False)
-        # Auto-select format based on what's available
+        # Auto-select format based on what's available in scene
         fmt = self._fmt_cb.currentData()
-        if fmt == "m4b" and not self._current.output_m4b_info and self._current.output_mp3_info:
+        has_m4b = bool(self._current.config.scene_m4b_path)
+        has_mp3 = bool(self._current.config.scene_mp3_path)
+        if fmt == "m4b" and not has_m4b and has_mp3:
             self._fmt_cb.setCurrentIndex(1)
-        elif fmt == "mp3" and not self._current.output_mp3_info and self._current.output_m4b_info:
+        elif fmt == "mp3" and not has_mp3 and has_m4b:
             self._fmt_cb.setCurrentIndex(0)
         self._regenerate()
 
@@ -291,14 +355,46 @@ class PrezPanel(QWidget):
             self.app.config_manager.save_book(self._current)
         self._regenerate()
 
+    def _get_scene_info(self, book: BookEntry, fmt: str):
+        """Retourne l'AudioInfo avec la taille issue du fichier scène réel."""
+        if fmt == "m4b":
+            base  = book.output_m4b_info
+            spath = book.config.scene_m4b_path
+            if base and spath and os.path.isfile(spath):
+                info = _copy.copy(base)
+                try:
+                    info.size_mb = round(os.path.getsize(spath) / (1024 ** 2), 1)
+                except OSError:
+                    pass
+                return info
+            return base
+        else:
+            base  = book.output_mp3_info
+            spath = book.config.scene_mp3_path
+            if base and spath and os.path.isdir(spath):
+                try:
+                    total = sum(
+                        os.path.getsize(os.path.join(spath, f))
+                        for f in os.listdir(spath)
+                        if f.lower().endswith(".mp3")
+                    )
+                    info = _copy.copy(base)
+                    info.size_mb = round(total / (1024 ** 2), 1)
+                    return info
+                except OSError:
+                    pass
+            return base
+
     def _regenerate(self):
         if not self._current:
             self._bbcode_edit.clear()
             self._preview.clear()
             return
-        rating = self._rating_le.text().strip()
-        fmt    = self._fmt_cb.currentData()
-        bbcode = generate_prez(self._current, rating=rating, fmt=fmt)
+        rating     = self._rating_le.text().strip()
+        fmt        = self._fmt_cb.currentData()
+        audio_info = self._get_scene_info(self._current, fmt)
+        bbcode = generate_prez(self._current, rating=rating, fmt=fmt,
+                               audio_info=audio_info)
         self._bbcode_edit.setPlainText(bbcode)
 
         if self._tabs.currentIndex() == 1:

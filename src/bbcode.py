@@ -30,10 +30,11 @@ def _title_line(cfg, fmt_label: str = "M4B") -> str:
     return f"{author} - {title_part} - {fmt_label}{year_str}"
 
 
-def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b") -> str:
+def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b",
+                  audio_info: "AudioInfo | None" = None) -> str:
     cfg = book.config
     fmt_label = "M4B" if fmt == "m4b" else "MP3"
-    info: AudioInfo | None = (
+    info: AudioInfo | None = audio_info if audio_info is not None else (
         book.output_m4b_info if fmt == "m4b" else book.output_mp3_info
     )
 

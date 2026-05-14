@@ -754,6 +754,8 @@ class SceneCopyPanel(QWidget):
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     shutil.copy2(book.output_m4b_path, target)
                     copied_paths.append(target)
+                    book.config.scene_m4b_path = target
+                    self.app.config_manager.save_book(book)
                     try:
                         write_m4b_nfo(book, target)
                     except Exception as e:
@@ -780,6 +782,8 @@ class SceneCopyPanel(QWidget):
                     except Exception as e:
                         errors.append(f"{book.display_title} (NFO MP3): {e}")
                     if mp3_files:
+                        book.config.scene_mp3_path = book_folder
+                        self.app.config_manager.save_book(book)
                         ok += 1
                     else:
                         errors.append(f"{book.display_title} (MP3): dossier source vide")

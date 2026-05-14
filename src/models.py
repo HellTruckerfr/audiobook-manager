@@ -123,6 +123,8 @@ class BookConfig:
     description: str = ""
     copyright: str = ""
     cover_url: str = ""
+    scene_m4b_path: str = ""
+    scene_mp3_path: str = ""
     selected_source_label: str = ""
     ignore_metadata_check: bool = False
     title_source: str = "detected"   # "detected" | "normalized" | "custom"
@@ -147,6 +149,8 @@ class BookConfig:
             "description": self.description,
             "copyright": self.copyright,
             "cover_url": self.cover_url,
+            "scene_m4b_path": self.scene_m4b_path,
+            "scene_mp3_path": self.scene_mp3_path,
             "selected_source_label": self.selected_source_label,
             "ignore_metadata_check": self.ignore_metadata_check,
             "title_source": self.title_source,
@@ -174,6 +178,8 @@ class BookConfig:
             description=d.get("description", ""),
             copyright=d.get("copyright", ""),
             cover_url=d.get("cover_url", ""),
+            scene_m4b_path=d.get("scene_m4b_path", ""),
+            scene_mp3_path=d.get("scene_mp3_path", ""),
             selected_source_label=d.get("selected_source_label", ""),
             ignore_metadata_check=d.get("ignore_metadata_check", False),
             title_source=d.get("title_source", "detected"),
