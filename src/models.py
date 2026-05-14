@@ -203,6 +203,7 @@ class BookEntry:
     output_m4b_info: Optional["AudioInfo"] = field(default=None)
     output_mp3_dir: str = field(default="")
     output_mp3_info: Optional["AudioInfo"] = field(default=None)
+    source_is_output: bool = field(default=False)  # source synthétique = fichier de sortie (source originale disparue)
 
     @property
     def display_title(self) -> str:

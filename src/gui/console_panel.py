@@ -3,14 +3,15 @@ import time
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
-    QLabel, QApplication,
+    QLabel, QApplication, QTabWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QObject
+from PyQt6.QtCore import pyqtSignal, QObject
 from PyQt6.QtGui import QFont
 
 
 class _LogBridge(QObject):
-    message = pyqtSignal(str, str)  # (text, level)
+    conv_msg   = pyqtSignal(str, str)  # (text, level) → conversions tab
+    action_msg = pyqtSignal(str, str)  # (text, level) → journal tab
 
 
 class ConsolePanel(QWidget):
@@ -27,11 +28,34 @@ class ConsolePanel(QWidget):
     def __init__(self):
         super().__init__()
         self._bridge = _LogBridge()
-        self._bridge.message.connect(self._append_html)
+        self._bridge.conv_msg.connect(self._append_conv)
+        self._bridge.action_msg.connect(self._append_action)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet(
+            "QTabBar::tab { padding: 5px 14px; }"
+            "QTabBar::tab:selected { color: white; }"
+        )
+
+        self._conv_text, conv_widget = self._make_tab_widget("Console de conversion")
+        self._tabs.addTab(conv_widget, "Conversions")
+
+        self._action_text, action_widget = self._make_tab_widget("Journal des actions")
+        self._tabs.addTab(action_widget, "Journal")
+
+        layout.addWidget(self._tabs, 1)
+
+    # ── Construction ──────────────────────────────────────────────────────
+
+    def _make_tab_widget(self, label: str):
+        widget = QWidget()
+        vl = QVBoxLayout(widget)
+        vl.setContentsMargins(0, 0, 0, 0)
+        vl.setSpacing(0)
 
         bar = QWidget()
         bar.setStyleSheet("background: #1a1a1a; border-bottom: 1px solid #2a2a2a;")
@@ -39,49 +63,58 @@ class ConsolePanel(QWidget):
         bl.setContentsMargins(10, 5, 10, 5)
         bl.setSpacing(8)
 
-        lbl = QLabel("Console de conversion")
+        lbl = QLabel(label)
         lbl.setStyleSheet("color: #666; font-size: 9pt;")
         bl.addWidget(lbl)
         bl.addStretch()
 
-        for label, fn in [("📋 Copier tout", self._copy_all),
-                           ("🗑 Vider",       self._clear)]:
-            btn = QPushButton(label)
-            btn.setFixedHeight(24)
-            btn.clicked.connect(fn)
-            bl.addWidget(btn)
-
-        layout.addWidget(bar)
-
-        self._text = QTextEdit()
-        self._text.setReadOnly(True)
-        self._text.setFont(QFont("Consolas", 9))
-        self._text.setStyleSheet(
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setFont(QFont("Consolas", 9))
+        text.setStyleSheet(
             "QTextEdit { background:#0d0d0d; color:#c0c0c0; border:none; padding:4px; }")
-        self._text.document().setMaximumBlockCount(8000)
-        layout.addWidget(self._text, 1)
+        text.document().setMaximumBlockCount(8000)
+
+        copy_btn = QPushButton("📋 Copier tout")
+        copy_btn.setFixedHeight(24)
+        copy_btn.clicked.connect(lambda _, t=text: QApplication.clipboard().setText(t.toPlainText()))
+        bl.addWidget(copy_btn)
+
+        clear_btn = QPushButton("🗑 Vider")
+        clear_btn.setFixedHeight(24)
+        clear_btn.clicked.connect(text.clear)
+        bl.addWidget(clear_btn)
+
+        vl.addWidget(bar)
+        vl.addWidget(text, 1)
+        return text, widget
 
     # ── API publique (thread-safe) ─────────────────────────────────────────
 
     def log(self, msg: str, level: str = "info"):
-        """Peut être appelé depuis n'importe quel thread."""
-        self._bridge.message.emit(msg, level)
+        """Log de conversion — peut être appelé depuis n'importe quel thread."""
+        self._bridge.conv_msg.emit(msg, level)
+
+    def log_action(self, msg: str, level: str = "info"):
+        """Journal des actions — peut être appelé depuis n'importe quel thread."""
+        self._bridge.action_msg.emit(msg, level)
 
     # ── Interne ────────────────────────────────────────────────────────────
 
-    def _append_html(self, msg: str, level: str):
+    def _fmt(self, msg: str, level: str) -> str:
         color = self.COLORS.get(level, "#c0c0c0")
         ts    = time.strftime("%H:%M:%S")
-        line  = (
+        return (
             f'<span style="color:#2e2e2e">[{ts}]</span>'
             f' <span style="color:{color}">{html.escape(msg)}</span>'
         )
-        self._text.append(line)
-        sb = self._text.verticalScrollBar()
+
+    def _append_conv(self, msg: str, level: str):
+        self._conv_text.append(self._fmt(msg, level))
+        sb = self._conv_text.verticalScrollBar()
         sb.setValue(sb.maximum())
 
-    def _clear(self):
-        self._text.clear()
-
-    def _copy_all(self):
-        QApplication.clipboard().setText(self._text.toPlainText())
+    def _append_action(self, msg: str, level: str):
+        self._action_text.append(self._fmt(msg, level))
+        sb = self._action_text.verticalScrollBar()
+        sb.setValue(sb.maximum())

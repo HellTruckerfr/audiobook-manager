@@ -87,6 +87,7 @@ class PrezPanel(QWidget):
     def __init__(self, app):
         super().__init__()
         self.app = app
+        self._all_books: List[BookEntry] = []
         self._books: List[BookEntry] = []
         self._current: Optional[BookEntry] = None
         self._upload_thread: Optional[_UploadThread] = None
@@ -111,7 +112,7 @@ class PrezPanel(QWidget):
         self._fmt_cb.addItem("M4B", "m4b")
         self._fmt_cb.addItem("MP3", "mp3")
         self._fmt_cb.setMaximumWidth(70)
-        self._fmt_cb.currentIndexChanged.connect(self._regenerate)
+        self._fmt_cb.currentIndexChanged.connect(self._apply_format_filter)
         bl.addWidget(self._fmt_cb)
 
         sep = QFrame()
@@ -190,7 +191,21 @@ class PrezPanel(QWidget):
         ll = QVBoxLayout(left)
         ll.setContentsMargins(6, 6, 6, 6)
         ll.setSpacing(4)
-        ll.addWidget(QLabel("Livres avec sortie disponible"))
+
+        list_header = QHBoxLayout()
+        self._list_lbl = QLabel("Livres en scène")
+        list_header.addWidget(self._list_lbl, 1)
+
+        self._rescan_btn = QPushButton("Rescan")
+        self._rescan_btn.setFixedHeight(22)
+        self._rescan_btn.setStyleSheet(
+            "QPushButton { font-size: 8pt; padding: 0 6px; }")
+        self._rescan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._rescan_btn.setToolTip("Rescanner les dossiers de sortie scène")
+        self._rescan_btn.clicked.connect(self._rescan_scene_copies)
+        list_header.addWidget(self._rescan_btn)
+
+        ll.addLayout(list_header)
         self._list = QListWidget()
         self._list.currentRowChanged.connect(self._on_row_changed)
         ll.addWidget(self._list, 1)
@@ -208,10 +223,10 @@ class PrezPanel(QWidget):
             "QTabBar::tab:selected { color: white; }")
 
         self._bbcode_edit = QTextEdit()
-        self._bbcode_edit.setReadOnly(True)
         self._bbcode_edit.setStyleSheet(
             "QTextEdit { font-family: Consolas, monospace; font-size: 9pt;"
             " background: #1a1a1a; color: #ddd; border: none; }")
+        self._bbcode_edit.textChanged.connect(self._on_bbcode_edited)
         self._tabs.addTab(self._bbcode_edit, "BBCode")
 
         self._preview = _PreviewBrowser()
@@ -238,11 +253,11 @@ class PrezPanel(QWidget):
     def refresh_books(self):
         all_books = list(self.app.scanner.load_last_books() or [])
         self._detect_scene_copies(all_books)
-        self._books = [
+        self._all_books = [
             b for b in all_books
             if b.config.scene_m4b_path or b.config.scene_mp3_path
         ]
-        self._fill_list()
+        self._apply_format_filter()
 
     # ── Détection automatique des copies scène ────────────────────────
 
@@ -282,6 +297,14 @@ class PrezPanel(QWidget):
         for book in books:
             changed = False
 
+            # Nettoyage des chemins périmés
+            if book.config.scene_m4b_path and not os.path.isfile(book.config.scene_m4b_path):
+                book.config.scene_m4b_path = ""
+                changed = True
+            if book.config.scene_mp3_path and not os.path.isdir(book.config.scene_mp3_path):
+                book.config.scene_mp3_path = ""
+                changed = True
+
             # Détection M4B par taille exacte
             if not book.config.scene_m4b_path and book.output_m4b_path:
                 if os.path.isfile(book.output_m4b_path):
@@ -302,7 +325,33 @@ class PrezPanel(QWidget):
             if changed:
                 self.app.config_manager.save_book(book)
 
+    def _rescan_scene_copies(self):
+        """Rescanne uniquement les dossiers scène sans recharger toute la bibliothèque."""
+        self._rescan_btn.setEnabled(False)
+        self._rescan_btn.setText("...")
+        try:
+            all_books = list(self.app.scanner.load_last_books() or [])
+            self._detect_scene_copies(all_books)
+            self._all_books = [
+                b for b in all_books
+                if b.config.scene_m4b_path or b.config.scene_mp3_path
+            ]
+            self._apply_format_filter()
+        finally:
+            self._rescan_btn.setEnabled(True)
+            self._rescan_btn.setText("Rescan")
+
     # ── Internals ─────────────────────────────────────────────────────
+
+    def _apply_format_filter(self):
+        fmt = self._fmt_cb.currentData()
+        if fmt == "m4b":
+            self._books = [b for b in self._all_books if b.config.scene_m4b_path]
+            self._list_lbl.setText("Livres M4B en scène")
+        else:
+            self._books = [b for b in self._all_books if b.config.scene_mp3_path]
+            self._list_lbl.setText("Livres MP3 en scène")
+        self._fill_list()
 
     def _fill_list(self):
         prev_id = self._current.id if self._current else None
@@ -311,13 +360,7 @@ class PrezPanel(QWidget):
         for book in self._books:
             author = book.display_author or "?"
             title  = book.display_title  or "?"
-            flags  = []
-            if book.config.scene_m4b_path:
-                flags.append("M4B")
-            if book.config.scene_mp3_path:
-                flags.append("MP3")
-            badge = f"  [{'/'.join(flags)}]" if flags else ""
-            item = QListWidgetItem(f"{author} — {title}{badge}")
+            item = QListWidgetItem(f"{author} — {title}")
             item.setData(Qt.ItemDataRole.UserRole, book.id)
             self._list.addItem(item)
         self._list.blockSignals(False)
@@ -328,6 +371,11 @@ class PrezPanel(QWidget):
                     return
         if self._list.count():
             self._list.setCurrentRow(0)
+        else:
+            self._current = None
+            self._bbcode_edit.clear()
+            self._preview.clear()
+            self._warn_lbl.clear()
 
     def _on_row_changed(self, row: int):
         if row < 0 or row >= len(self._books):
@@ -339,14 +387,6 @@ class PrezPanel(QWidget):
         self._cover_url_le.blockSignals(True)
         self._cover_url_le.setText(self._current.config.cover_url)
         self._cover_url_le.blockSignals(False)
-        # Auto-select format based on what's available in scene
-        fmt = self._fmt_cb.currentData()
-        has_m4b = bool(self._current.config.scene_m4b_path)
-        has_mp3 = bool(self._current.config.scene_mp3_path)
-        if fmt == "m4b" and not has_m4b and has_mp3:
-            self._fmt_cb.setCurrentIndex(1)
-        elif fmt == "mp3" and not has_mp3 and has_m4b:
-            self._fmt_cb.setCurrentIndex(0)
         self._regenerate()
 
     def _on_cover_url_changed(self, url: str):
@@ -356,7 +396,7 @@ class PrezPanel(QWidget):
         self._regenerate()
 
     def _get_scene_info(self, book: BookEntry, fmt: str):
-        """Retourne l'AudioInfo avec la taille issue du fichier scène réel."""
+        """Retourne l'AudioInfo avec la taille issue du fichier/dossier scène réel."""
         if fmt == "m4b":
             base  = book.output_m4b_info
             spath = book.config.scene_m4b_path
@@ -370,7 +410,8 @@ class PrezPanel(QWidget):
             return base
         else:
             base  = book.output_mp3_info
-            spath = book.config.scene_mp3_path
+            # Priorité : dossier scène, sinon dossier de sortie MP3
+            spath = book.config.scene_mp3_path or book.output_mp3_dir
             if base and spath and os.path.isdir(spath):
                 try:
                     total = sum(
@@ -380,6 +421,14 @@ class PrezPanel(QWidget):
                     )
                     info = _copy.copy(base)
                     info.size_mb = round(total / (1024 ** 2), 1)
+                    # Utilise le bitrate configuré (encodage cible) plutôt que
+                    # le débit container mesuré par ffprobe (inclut l'overhead)
+                    cfg_br = book.config.bitrate  # ex: "128k"
+                    if cfg_br:
+                        try:
+                            info.bitrate_kbps = int(cfg_br.rstrip("kK"))
+                        except ValueError:
+                            pass
                     return info
                 except OSError:
                     pass
@@ -404,12 +453,14 @@ class PrezPanel(QWidget):
         warn = []
         if not self._current.config.cover_url:
             warn.append("⚠ Pas d'URL de cover.")
-        info = (self._current.output_m4b_info if fmt == "m4b"
-                else self._current.output_mp3_info)
-        if not info:
+        if not audio_info:
             warn.append(f"⚠ Pas d'infos {fmt.upper()} — codec/bitrate/taille omis.")
         self._warn_lbl.setText("  ".join(warn))
         self._status_lbl.setText("")
+
+    def _on_bbcode_edited(self):
+        if self._tabs.currentIndex() == 1:
+            self._update_preview(self._bbcode_edit.toPlainText())
 
     def _on_tab_changed(self, index: int):
         if index == 1:

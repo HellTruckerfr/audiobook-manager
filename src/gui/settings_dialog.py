@@ -46,8 +46,8 @@ class SettingsDialog(QDialog):
         vl.setContentsMargins(8, 8, 8, 8)
         vl.addWidget(QLabel("Dossiers à scanner (MP3, M4B, mixtes) :"))
 
-        self._src_table = QTableWidget(0, 3)
-        self._src_table.setHorizontalHeaderLabels(["Étiquette", "Chemin", "Structuré"])
+        self._src_table = QTableWidget(0, 4)
+        self._src_table.setHorizontalHeaderLabels(["Étiquette", "Chemin", "Structuré", "MP3 seul"])
         self._src_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._src_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._src_table.setShowGrid(False)
@@ -57,8 +57,10 @@ class SettingsDialog(QDialog):
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self._src_table.setColumnWidth(0, 120)
         self._src_table.setColumnWidth(2, 80)
+        self._src_table.setColumnWidth(3, 80)
         vl.addWidget(self._src_table, 1)
 
         btn_row = QHBoxLayout()
@@ -328,10 +330,12 @@ class SettingsDialog(QDialog):
     def _save(self):
         folders = []
         for row in range(self._src_table.rowCount()):
-            label = self._src_table.item(row, 0).text()
-            path  = self._src_table.item(row, 1).text()
-            struc = self._src_table.item(row, 2).text() == "Oui"
-            folders.append(FolderConfig(label=label, path=path, structured=struc))
+            label    = self._src_table.item(row, 0).text()
+            path     = self._src_table.item(row, 1).text()
+            struc    = self._src_table.item(row, 2).text() == "Oui"
+            mp3_only = self._src_table.item(row, 3).text() == "Oui"
+            folders.append(FolderConfig(label=label, path=path,
+                                        structured=struc, mp3_only=mp3_only))
 
         self.cfg.app_config.source_folders = folders
         self.cfg.app_config.output_m4b     = self._out_m4b.text()
@@ -355,7 +359,11 @@ class SettingsDialog(QDialog):
     def _append_source(self, fc: FolderConfig):
         row = self._src_table.rowCount()
         self._src_table.insertRow(row)
-        for col, text in enumerate([fc.label, fc.path, "Oui" if fc.structured else "Non"]):
+        for col, text in enumerate([
+            fc.label, fc.path,
+            "Oui" if fc.structured else "Non",
+            "Oui" if fc.mp3_only else "Non",
+        ]):
             it = QTableWidgetItem(text)
             it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             self._src_table.setItem(row, col, it)
@@ -372,10 +380,14 @@ class SettingsDialog(QDialog):
             label=self._src_table.item(row, 0).text(),
             path=self._src_table.item(row, 1).text(),
             structured=self._src_table.item(row, 2).text() == "Oui",
+            mp3_only=self._src_table.item(row, 3).text() == "Oui",
         )
         def _apply(new_fc: FolderConfig):
-            for col, text in enumerate([new_fc.label, new_fc.path,
-                                         "Oui" if new_fc.structured else "Non"]):
+            for col, text in enumerate([
+                new_fc.label, new_fc.path,
+                "Oui" if new_fc.structured else "Non",
+                "Oui" if new_fc.mp3_only else "Non",
+            ]):
                 self._src_table.item(row, col).setText(text)
 
         _FolderDialog(self, fc, _apply).exec()
@@ -443,6 +455,10 @@ class _FolderDialog(QDialog):
         hint.setStyleSheet("color: #888; font-size: 8pt;")
         form_l.addWidget(hint)
 
+        self._mp3_only_cb = QCheckBox("MP3 seul  (ignoré comme source pour l'encodage M4B)")
+        self._mp3_only_cb.setChecked(folder.mp3_only if folder else False)
+        form_l.addWidget(self._mp3_only_cb)
+
         vl.addWidget(form_w)
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
@@ -468,5 +484,6 @@ class _FolderDialog(QDialog):
             label=self._label_le.text().strip() or path,
             path=path,
             structured=self._structured_cb.isChecked(),
+            mp3_only=self._mp3_only_cb.isChecked(),
         ))
         self.accept()

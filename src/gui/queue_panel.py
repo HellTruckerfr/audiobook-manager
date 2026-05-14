@@ -6,9 +6,9 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFrame, QMenu, QProgressBar, QComboBox,
+    QFrame, QMenu, QProgressBar, QComboBox, QStyle, QStyleOptionButton,
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QColor, QAction
 from PyQt6.QtWidgets import QApplication
 
@@ -74,6 +74,48 @@ class _Bridge(QObject):
     log      = pyqtSignal(str, str)
 
 
+class _CheckHeaderView(QHeaderView):
+    check_toggled = pyqtSignal(bool)
+
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self._check_col = COL_CHECK
+        self._checked   = False
+        self._partial   = False
+        self.setSectionsClickable(True)
+
+    def set_state(self, checked: bool, partial: bool = False):
+        self._checked = checked
+        self._partial = partial
+        self.viewport().update()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        super().paintSection(painter, rect, logicalIndex)
+        painter.restore()
+        if logicalIndex != self._check_col:
+            return
+        opt = QStyleOptionButton()
+        size = self.style().pixelMetric(QStyle.PixelMetric.PM_IndicatorWidth)
+        x = rect.x() + (rect.width() - size) // 2
+        y = rect.y() + (rect.height() - size) // 2
+        opt.rect = QRect(x, y, size, size)
+        opt.state = QStyle.StateFlag.State_Enabled
+        if self._partial:
+            opt.state |= QStyle.StateFlag.State_NoChange
+        elif self._checked:
+            opt.state |= QStyle.StateFlag.State_On
+        else:
+            opt.state |= QStyle.StateFlag.State_Off
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorCheckBox, opt, painter)
+
+    def mousePressEvent(self, event):
+        if self.logicalIndexAt(event.pos()) == self._check_col:
+            self.check_toggled.emit(not self._checked)
+            return
+        super().mousePressEvent(event)
+
+
 class QueuePanel(QWidget):
     pending_changed = pyqtSignal(int)
     jobs_changed    = pyqtSignal()
@@ -87,6 +129,8 @@ class QueuePanel(QWidget):
         self._progress_bars: dict              = {}
         self._job_start_time: dict             = {}
         self._populating: bool                 = False
+        self._sort_col: int                    = -1
+        self._sort_asc: bool                   = True
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -136,30 +180,10 @@ class QueuePanel(QWidget):
         btn_cancel.clicked.connect(self._cancel_current)
         ctrl.addWidget(btn_cancel)
 
-        btn_cancel_all = QPushButton("✕✕  Tout annuler")
-        btn_cancel_all.setToolTip("Annule la conversion en cours ET vide tous les jobs en attente")
-        btn_cancel_all.setStyleSheet(_BTN_STYLE)
-        btn_cancel_all.clicked.connect(self._cancel_all)
-        ctrl.addWidget(btn_cancel_all)
-
         btn_clear = QPushButton("🗑  Vider terminés")
         btn_clear.setStyleSheet(_BTN_STYLE)
         btn_clear.clicked.connect(self._clear_done)
         ctrl.addWidget(btn_clear)
-
-        ctrl.addSpacing(12)
-
-        check_all_btn = QPushButton("☑ Tout")
-        check_all_btn.setToolTip("Cocher tous les jobs")
-        check_all_btn.setStyleSheet(_BTN_STYLE)
-        check_all_btn.clicked.connect(self._check_all)
-        ctrl.addWidget(check_all_btn)
-
-        uncheck_all_btn = QPushButton("☐ Tout")
-        uncheck_all_btn.setToolTip("Décocher tous les jobs")
-        uncheck_all_btn.setStyleSheet(_BTN_STYLE)
-        uncheck_all_btn.clicked.connect(self._uncheck_all)
-        ctrl.addWidget(uncheck_all_btn)
 
         ctrl.addStretch()
 
@@ -176,8 +200,13 @@ class QueuePanel(QWidget):
 
         # ── Table ──────────────────────────────────────────────────────
         self._table = QTableWidget(0, 7)
+
+        check_header = _CheckHeaderView(Qt.Orientation.Horizontal, self._table)
+        self._check_header = check_header
+        self._table.setHorizontalHeader(check_header)
+
         self._table.setHorizontalHeaderLabels(
-            ["▶", "", "Titre", "Auteur", "Progression", "Taille", "Info"])
+            ["", "", "Titre", "Auteur", "Progression", "Taille", "Info"])
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -204,6 +233,10 @@ class QueuePanel(QWidget):
         self._table.setColumnWidth(COL_AUTH,  160)
         self._table.setColumnWidth(COL_PROG,  180)
         self._table.setColumnWidth(COL_SIZE,  72)
+
+        check_header.check_toggled.connect(self._on_check_header_toggled)
+        check_header.sectionClicked.connect(self._sort_by)
+        check_header.setSortIndicatorShown(True)
 
         layout.addWidget(self._table, 1)
         self._update_status_lbl()
@@ -454,6 +487,7 @@ class QueuePanel(QWidget):
                     cb.setCheckState(Qt.CheckState.Checked)
         finally:
             self._populating = False
+        self._update_check_header()
 
     def _uncheck_all(self):
         self._populating = True
@@ -464,9 +498,75 @@ class QueuePanel(QWidget):
                     cb.setCheckState(Qt.CheckState.Unchecked)
         finally:
             self._populating = False
+        self._update_check_header()
+
+    def _on_check_header_toggled(self, checked: bool):
+        if checked:
+            self._check_all()
+        else:
+            self._uncheck_all()
+
+    def _update_check_header(self):
+        n = self._table.rowCount()
+        checked_count = sum(
+            1 for row in range(n)
+            if (cb := self._table.item(row, COL_CHECK))
+            and cb.checkState() == Qt.CheckState.Checked
+        )
+        self._check_header.set_state(checked_count == n and n > 0, 0 < checked_count < n)
+
+    _SORTABLE_COLS = {COL_TITLE, COL_AUTH}
+
+    def _sort_by(self, col: int):
+        if col not in self._SORTABLE_COLS:
+            return
+        if self._sort_col == col:
+            self._sort_asc = not self._sort_asc
+        else:
+            self._sort_col = col
+            self._sort_asc = True
+        if col == COL_TITLE:
+            self._jobs.sort(key=lambda j: j.book.display_title.lower(), reverse=not self._sort_asc)
+        elif col == COL_AUTH:
+            self._jobs.sort(key=lambda j: j.book.display_author.lower(), reverse=not self._sort_asc)
+        order = Qt.SortOrder.AscendingOrder if self._sort_asc else Qt.SortOrder.DescendingOrder
+        self._check_header.setSortIndicator(col, order)
+        self._rebuild_table()
+
+    def _rebuild_table(self):
+        saved: dict = {}
+        for row in range(self._table.rowCount()):
+            ti = self._table.item(row, COL_TITLE)
+            if not ti:
+                continue
+            book_id = ti.data(Qt.ItemDataRole.UserRole)
+            si = self._table.item(row, COL_SIZE)
+            ii = self._table.item(row, COL_INFO)
+            ci = self._table.item(row, COL_CHECK)
+            saved[book_id] = {
+                "size":    si.text() if si else "",
+                "info":    ii.text() if ii else "",
+                "checked": ci.checkState() == Qt.CheckState.Checked if ci else False,
+            }
+        self._populating = True
+        self._progress_bars.clear()
+        self._table.setRowCount(0)
+        try:
+            for i, job in enumerate(self._jobs):
+                self._table.insertRow(i)
+                self._table.setRowHeight(i, 28)
+                d = saved.get(job.book.id, {"size": "", "info": "", "checked": False})
+                self._set_row(i, job, d["size"], d["info"])
+                cb = self._table.item(i, COL_CHECK)
+                if cb and d["checked"]:
+                    cb.setCheckState(Qt.CheckState.Checked)
+        finally:
+            self._populating = False
+        self._update_check_header()
 
     def _on_item_changed(self, item: QTableWidgetItem):
-        pass  # checkboxes gérées via _checked_jobs()
+        if not self._populating and item.column() == COL_CHECK:
+            self._update_check_header()
 
     def _checked_jobs(self) -> List[ConversionJob]:
         result = []

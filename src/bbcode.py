@@ -19,15 +19,17 @@ def _size_display(info: AudioInfo) -> str:
     return f"{info.size_mb / 1024:.2f} GiB"
 
 
-def _title_line(cfg, fmt_label: str = "M4B") -> str:
+def _title_lines(cfg, fmt_label: str = "M4B") -> list:
+    """Retourne 1 ou 2 lignes de titre selon la présence d'une série."""
     author = cfg.author or "?"
+    title  = cfg.title or "?"
+    year_str = f" ({cfg.year})" if cfg.year else ""
+    line1 = f"{author} - {title} - {fmt_label}{year_str}"
+    lines = [f"[size=6][color=#eab308][b]{line1}[/b][/color][/size]"]
     if cfg.series:
         bracket = f"[{cfg.volume}]" if cfg.volume else "[Intégrale]"
-        title_part = f"{cfg.series} {bracket}"
-    else:
-        title_part = cfg.title or "?"
-    year_str = f" ({cfg.year})" if cfg.year else ""
-    return f"{author} - {title_part} - {fmt_label}{year_str}"
+        lines.append(f"[size=6][color=#eab308][b]{cfg.series} {bracket}[/b][/color][/size]")
+    return lines
 
 
 def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b",
@@ -41,12 +43,10 @@ def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b",
     lines = ["[center]"]
 
     if cfg.cover_url:
-        lines += [f"[img]{cfg.cover_url}[/img]", ""]
+        lines.append(f"[img]{cfg.cover_url}[/img]")
 
-    lines += [
-        f"[size=6][color=#eab308][b]{_title_line(cfg, fmt_label)}[/b][/color][/size]",
-        "",
-    ]
+    lines += _title_lines(cfg, fmt_label)
+    lines.append("")
 
     if rating:
         lines.append(f"[b]Note :[/b] {rating}/10")
@@ -64,8 +64,7 @@ def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b",
         lines.append(f"[b]Lu par :[/b] {cfg.narrator}")
     if cfg.publisher:
         lines.append(f"[b]Éditeur :[/b] {cfg.publisher}")
-    lines.append("[b]Format :[/b] Audiobook")
-    lines.append(f"[b]Format du conteneur :[/b] {fmt_label}")
+    lines.append(f"[b]Format :[/b] {fmt_label}")
 
     if info:
         if fmt == "m4b":
@@ -77,20 +76,21 @@ def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b",
     return "\n".join(lines)
 
 
-# ── BBCode → HTML (preview) ───────────────────────────────────────────────
+# ── BBCode → HTML (preview basique) ──────────────────────────────────────────
 
 _HTML_CSS = """
 body {
     background: #1e1e1e; color: #ddd;
     font-family: "Segoe UI", sans-serif; font-size: 10pt;
-    padding: 24px; line-height: 1.6; margin: 0;
+    padding: 24px; margin: 0;
 }
 blockquote {
-    background: #252525; border-left: 3px solid #555;
+    background: #252525; border-left: 3px solid #eab308;
     padding: 10px 16px; margin: 8px 0; color: #bbb; font-style: italic;
+    border-radius: 0 4px 4px 0;
 }
 img { border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.6);
-      max-width: 220px; max-height: 320px; }
+      max-width: 500px; height: auto; margin-bottom: 12px; }
 """
 
 _CONVERSIONS = [
@@ -118,3 +118,4 @@ def bbcode_to_html(bbcode: str) -> str:
         f'<!DOCTYPE html><html><head><meta charset="utf-8">'
         f'<style>{_HTML_CSS}</style></head><body>{t}</body></html>'
     )
+

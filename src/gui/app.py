@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import (
     QFrame, QPushButton, QLabel, QStackedWidget, QProgressBar,
     QMessageBox,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QPalette
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QEvent, QSize
+from PyQt6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QImage
 
 from ..config_manager import ConfigManager
 from ..scanner import Scanner
@@ -25,7 +25,48 @@ from .settings_dialog import SettingsDialog
 from .referential_panel import ReferentialPanel
 from .theme import DARK_STYLESHEET
 
-SIDEBAR_W = 200
+def _auto_icon(path: str) -> QIcon:
+    """Load icon and trim transparent borders to normalize visual weight."""
+    pix = QPixmap(path)
+    if pix.isNull():
+        return QIcon()
+
+    # Analyse at 48×48 for speed
+    N = 48
+    small = pix.scaled(N, N,
+                        Qt.AspectRatioMode.IgnoreAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation)
+    img = small.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    w, h = img.width(), img.height()
+    ALPHA = 20
+
+    def row_ok(y):
+        return any(((img.pixel(x, y) >> 24) & 0xFF) > ALPHA for x in range(w))
+    def col_ok(x):
+        return any(((img.pixel(x, y) >> 24) & 0xFF) > ALPHA for y in range(h))
+
+    min_y = next((y for y in range(h)      if row_ok(y)), 0)
+    max_y = next((y for y in range(h-1,-1,-1) if row_ok(y)), h-1)
+    min_x = next((x for x in range(w)      if col_ok(x)), 0)
+    max_x = next((x for x in range(w-1,-1,-1) if col_ok(x)), w-1)
+
+    # No meaningful padding found → return as-is
+    if min_x <= 1 and min_y <= 1 and max_x >= w-2 and max_y >= h-2:
+        return QIcon(path)
+
+    # Crop full-res with 5% padding
+    sx, sy = pix.width() / w, pix.height() / h
+    px = max(1, int((max_x - min_x) * 0.05))
+    py = max(1, int((max_y - min_y) * 0.05))
+    x1 = max(0, int((min_x - px) * sx))
+    y1 = max(0, int((min_y - py) * sy))
+    x2 = min(pix.width(),  int((max_x + px + 1) * sx))
+    y2 = min(pix.height(), int((max_y + py + 1) * sy))
+    return QIcon(pix.copy(x1, y1, x2 - x1, y2 - y1))
+
+
+SIDEBAR_W           = 200
+SIDEBAR_W_COLLAPSED = 52
 
 NAV_BASE = """
 QPushButton {{
@@ -40,6 +81,28 @@ QPushButton {{
 }}
 QPushButton:hover {{ background: {hover}; }}
 """
+
+NAV_BASE_ICON = """
+QPushButton {{
+    background: {bg};
+    color: {fg};
+    text-align: center;
+    padding: 11px 0px;
+    border: none;
+    font-size: 14pt;
+    border-radius: 0;
+}}
+QPushButton:hover {{ background: {hover}; }}
+"""
+
+
+class _ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class _ScanThread(QThread):
@@ -155,6 +218,21 @@ class AudiobookManagerApp:
         self.editor_panel.refresh_queue_state()
 
     def _build_sidebar(self) -> QFrame:
+        self._sidebar_expanded = True
+        self._sidebar_nav_items    = []   # (page_id, icon, label, btn)
+        self._sidebar_section_lbls = []   # QLabel section headers
+
+        _icons = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons")
+        self._nav_icon_paths = {
+            "library":     os.path.join(_icons, "Bibliothèque.png"),
+            "editor":      os.path.join(_icons, "editeur.png"),
+            "queue":       os.path.join(_icons, "Conversion.png"),
+            "scene_copy":  os.path.join(_icons, "copie scene.png"),
+            "prez":        os.path.join(_icons, "presentation.png"),
+            "referential": os.path.join(_icons, "referentiel.png"),
+            "console":     os.path.join(_icons, "terminal.png"),
+        }
+
         sb = QFrame()
         sb.setFixedWidth(SIDEBAR_W)
         sb.setObjectName("Sidebar")
@@ -164,60 +242,181 @@ class AudiobookManagerApp:
                 border-right: 1px solid #333;
             }
         """)
+        self._sidebar = sb
 
         layout = QVBoxLayout(sb)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Logo + titre
+        # ── Header : logo + toggle ──
         header = QWidget()
         header.setStyleSheet("background: transparent;")
         hl = QVBoxLayout(header)
-        hl.setContentsMargins(0, 24, 0, 16)
-        hl.setSpacing(4)
+        hl.setContentsMargins(0, 16, 0, 12)
+        hl.setSpacing(3)
         hl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        for text, style in [
-            ("🎧",              "color:#0067c0; font-size:26pt; background:transparent;"),
-            ("Audiobook Manager","color:#f3f3f3; font-size:10pt; font-weight:bold; background:transparent;"),
-            ("HellTrucker",     "color:#888; font-size:8pt; background:transparent;"),
-        ]:
-            lbl = QLabel(text)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            lbl.setStyleSheet(style)
-            hl.addWidget(lbl)
+        self._app_icon_pixmap = QPixmap(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "audiobook-manager.png"))
+
+        self._lbl_icon = _ClickableLabel()
+        self._lbl_icon.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._lbl_icon.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._lbl_icon.setToolTip("Réduire / agrandir la sidebar")
+        self._lbl_icon.clicked.connect(self._toggle_sidebar)
+        self._lbl_icon.setStyleSheet("background:transparent; padding:4px;")
+        self._set_icon_pixmap(96)
+        hl.addWidget(self._lbl_icon)
+
+        self._lbl_name = QLabel("Audiobook Manager")
+        self._lbl_name.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._lbl_name.setStyleSheet("color:#f3f3f3; font-size:10pt; font-weight:bold; background:transparent;")
+        hl.addWidget(self._lbl_name)
+
+        self._lbl_user = QLabel("HellTrucker")
+        self._lbl_user.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._lbl_user.setStyleSheet("color:#888; font-size:8pt; background:transparent;")
+        hl.addWidget(self._lbl_user)
 
         layout.addWidget(header)
         layout.addWidget(self._hline())
 
-        for page_id, icon, label in [
+        TOP_ITEMS = [
+            "Édition",
             ("library",      "🔍", "Bibliothèque"),
             ("editor",       "✏",  "Éditeur"),
             ("queue",        "▶",  "Conversion"),
+            "Scène",
             ("scene_copy",   "📋", "Copie scène"),
             ("prez",         "📰", "Présentation"),
-            ("console",      "🖥", "Console"),
+        ]
+
+        BOTTOM_ITEMS = [
+            "Outils",
             ("referential",  "📚", "Référentiel"),
-        ]:
-            btn = QPushButton(f"  {icon}  {label}")
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(NAV_BASE.format(bg="transparent", fg="#ccc",
-                                              hover="rgba(255,255,255,0.06)"))
-            btn.clicked.connect(lambda _, p=page_id: self._show_page(p))
-            layout.addWidget(btn)
-            self._nav_btns[page_id] = btn
+            ("console",      "🖥", "Console"),
+        ]
+
+        for item in TOP_ITEMS:
+            self._add_nav_item(layout, item)
 
         layout.addStretch()
+
+        for item in BOTTOM_ITEMS:
+            self._add_nav_item(layout, item)
+
         layout.addWidget(self._hline())
 
-        cfg_btn = QPushButton("  ⚙  Paramètres")
-        cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cfg_btn.setStyleSheet(NAV_BASE.format(bg="transparent", fg="#888",
-                                              hover="rgba(255,255,255,0.06)"))
-        cfg_btn.clicked.connect(self._open_settings)
-        layout.addWidget(cfg_btn)
+        self._settings_btn = QPushButton("   Paramètres")
+        self._settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._settings_btn.setIcon(_auto_icon(os.path.join(_icons, "parametre.png")))
+        self._settings_btn.setIconSize(QSize(32, 32))
+        self._settings_btn.setStyleSheet(NAV_BASE.format(bg="transparent", fg="#888",
+                                                         hover="rgba(255,255,255,0.06)"))
+        self._settings_btn.clicked.connect(self._open_settings)
+        layout.addWidget(self._settings_btn)
 
         return sb
+
+    def _add_nav_item(self, layout, item):
+        if isinstance(item, str):
+            lbl = QLabel(item.upper())
+            lbl.setStyleSheet(
+                "color: #555; font-size: 7.5pt; font-weight: bold;"
+                " padding: 10px 16px 2px 16px; background: transparent;")
+            layout.addWidget(lbl)
+            self._sidebar_section_lbls.append(lbl)
+            return
+        page_id, icon, label = item
+        icon_path = self._nav_icon_paths.get(page_id)
+        if icon_path:
+            btn = QPushButton(f"   {label}")
+            btn.setIcon(_auto_icon(icon_path))
+            btn.setIconSize(QSize(32, 32))
+        else:
+            btn = QPushButton(f"  {icon}  {label}")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(NAV_BASE.format(bg="transparent", fg="#ccc",
+                                          hover="rgba(255,255,255,0.06)"))
+        btn.clicked.connect(lambda _, p=page_id: self._show_page(p))
+        layout.addWidget(btn)
+        self._nav_btns[page_id] = btn
+        self._sidebar_nav_items.append((page_id, icon, label, btn))
+
+    def _set_icon_pixmap(self, size: int):
+        if self._app_icon_pixmap.isNull():
+            self._lbl_icon.setText("🎧")
+            self._lbl_icon.setStyleSheet(
+                f"color:#0067c0; font-size:{'26' if size >= 40 else '20'}pt;"
+                " background:transparent; padding:4px;")
+        else:
+            ratio = self._lbl_icon.devicePixelRatioF()
+            pix = self._app_icon_pixmap.scaled(
+                int(size * ratio), int(size * ratio),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            pix.setDevicePixelRatio(ratio)
+            self._lbl_icon.setPixmap(pix)
+
+    def _toggle_sidebar(self):
+        self._sidebar_expanded = not self._sidebar_expanded
+        exp = self._sidebar_expanded
+
+        self._sidebar.setFixedWidth(SIDEBAR_W if exp else SIDEBAR_W_COLLAPSED)
+        self._lbl_name.setVisible(exp)
+        self._lbl_user.setVisible(exp)
+        self._set_icon_pixmap(96 if exp else 64)
+
+        for lbl in self._sidebar_section_lbls:
+            lbl.setVisible(exp)
+
+        for page_id, icon, label, btn in self._sidebar_nav_items:
+            has_png = page_id in self._nav_icon_paths
+            active  = (self._stack.currentWidget() == self._pages.get(page_id))
+            if exp:
+                if has_png:
+                    if page_id == "queue":
+                        current_text = btn.text()
+                        badge = ""
+                        if "(" in current_text:
+                            badge = " " + current_text[current_text.index("("):]
+                        btn.setText(f"   {label}{badge}")
+                    else:
+                        btn.setText(f"   {label}")
+                else:
+                    if page_id == "queue":
+                        current_text = btn.text()
+                        badge = ""
+                        if "(" in current_text:
+                            badge = " " + current_text[current_text.index("("):]
+                        btn.setText(f"  {icon}  {label}{badge}")
+                    else:
+                        btn.setText(f"  {icon}  {label}")
+                btn.setStyleSheet(
+                    NAV_BASE.format(
+                        bg="#0067c0" if active else "transparent",
+                        fg="white"   if active else "#ccc",
+                        hover="#0055aa" if active else "rgba(255,255,255,0.06)",
+                    )
+                )
+            else:
+                btn.setText("" if has_png else icon)
+                btn.setStyleSheet(
+                    NAV_BASE_ICON.format(
+                        bg="#0067c0" if active else "transparent",
+                        fg="white"   if active else "#ccc",
+                        hover="#0055aa" if active else "rgba(255,255,255,0.06)",
+                    )
+                )
+
+        if exp:
+            self._settings_btn.setText("   Paramètres")
+            self._settings_btn.setStyleSheet(NAV_BASE.format(
+                bg="transparent", fg="#888", hover="rgba(255,255,255,0.06)"))
+        else:
+            self._settings_btn.setText("")
+            self._settings_btn.setStyleSheet(NAV_BASE_ICON.format(
+                bg="transparent", fg="#666", hover="rgba(255,255,255,0.06)"))
 
     @staticmethod
     def _hline() -> QFrame:
@@ -235,13 +434,14 @@ class AudiobookManagerApp:
                 self.prez_panel.refresh_books()
             elif page_id == "referential":
                 self.referential_panel.refresh()
-        for pid, btn in self._nav_btns.items():
+        exp = self._sidebar_expanded
+        base = NAV_BASE if exp else NAV_BASE_ICON
+        for pid, icon, label, btn in self._sidebar_nav_items:
             if pid == page_id:
-                btn.setStyleSheet(NAV_BASE.format(bg="#0067c0", fg="white",
-                                                  hover="#0055aa"))
+                btn.setStyleSheet(base.format(bg="#0067c0", fg="white", hover="#0055aa"))
             else:
-                btn.setStyleSheet(NAV_BASE.format(bg="transparent", fg="#ccc",
-                                                  hover="rgba(255,255,255,0.06)"))
+                btn.setStyleSheet(base.format(bg="transparent", fg="#ccc",
+                                              hover="rgba(255,255,255,0.06)"))
 
     # ── Page 1 : Bibliothèque ──────────────────────────────────────────────
 
@@ -251,74 +451,10 @@ class AudiobookManagerApp:
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(0)
 
-        # Toolbar
-        bar = QWidget()
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(10, 8, 10, 8)
-        bl.setSpacing(10)
-
-        self._scan_btn = QPushButton("⟳  Scanner")
-        self._scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._scan_btn.setToolTip(
-            "Scan incrémental : ne traite que les nouveaux dossiers / fichiers.\n"
-            "Les livres déjà connus sont conservés tels quels.\n"
-            "Les sorties de conversion et les chemins listés dans Paramètres > "
-            "« Ignorés au scan » sont exclus.\n"
-            "Pour forcer un scan complet : cliquer Reset puis Scanner.")
-        self._scan_btn.setStyleSheet("""
-            QPushButton {
-                background: #0067c0; color: white; border: none;
-                padding: 5px 14px; font-size: 9pt; font-weight: bold;
-                font-family: "Segoe UI";
-            }
-            QPushButton:hover   { background: #0055aa; }
-            QPushButton:pressed { background: #003f88; }
-            QPushButton:disabled{ background: #444; color: #888; }
-        """)
-        self._scan_btn.clicked.connect(self._start_scan)
-        bl.addWidget(self._scan_btn)
-
-        update_btn = QPushButton("↻  Update")
-        update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        update_btn.setToolTip(
-            "Recharge la bibliothèque depuis l'état sauvegardé\n"
-            "(instantané, sans aucun scan de fichiers)")
-        update_btn.clicked.connect(self._update_library)
-        bl.addWidget(update_btn)
-
-        reset_btn = QPushButton("↺  Reset cache")
-        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.setToolTip(
-            "Vide uniquement le cache de fingerprints / ffprobe.\n"
-            "Les fusions manuelles, les méta saisies et la liste des livres "
-            "sont préservées.\n"
-            "Le prochain Scanner re-fingerprint tous les fichiers à neuf.")
-        reset_btn.clicked.connect(self._reset_cache)
-        bl.addWidget(reset_btn)
-
-        self._scan_label = QLabel("Aucun scan effectué")
-        self._scan_label.setStyleSheet("color: #888; font-size: 9pt;")
-        bl.addWidget(self._scan_label)
-
-        self._scan_progress = QProgressBar()
-        self._scan_progress.setRange(0, 100)
-        self._scan_progress.setValue(0)
-        self._scan_progress.setMaximumWidth(160)
-        self._scan_progress.setMaximumHeight(10)
-        self._scan_progress.setTextVisible(True)
-        self._scan_progress.setFormat("%p%")
-        self._scan_progress.setStyleSheet(
-            "QProgressBar { border: 1px solid #444; border-radius: 4px;"
-            " background: #2a2a2a; color: #ccc; font-size: 7pt; }"
-            "QProgressBar::chunk { background: #0067c0; border-radius: 3px; }")
-        self._scan_progress.hide()
-        bl.addWidget(self._scan_progress)
-
-        bl.addStretch()
-        vl.addWidget(bar)
-        vl.addWidget(self._hline())
-
         self.library_panel = LibraryPanel(self)
+        self.library_panel.scan_requested.connect(self._start_scan)
+        self.library_panel.update_requested.connect(self._update_library)
+        self.library_panel.reset_requested.connect(self._reset_cache)
         vl.addWidget(self.library_panel, 1)
 
         self._pages["library"] = page
@@ -332,38 +468,8 @@ class AudiobookManagerApp:
         vl.setContentsMargins(0, 0, 0, 0)
         vl.setSpacing(0)
 
-        # Header
-        header = QWidget()
-        hl = QHBoxLayout(header)
-        hl.setContentsMargins(8, 5, 8, 5)
-        hl.setSpacing(8)
-
-        back = QPushButton("← Bibliothèque")
-        back.setCursor(Qt.CursorShape.PointingHandCursor)
-        back.setStyleSheet("""
-            QPushButton {
-                background: transparent; color: #888; border: none;
-                padding: 4px 10px; font-size: 9pt;
-            }
-            QPushButton:hover { color: #f3f3f3; background: rgba(255,255,255,0.05); }
-        """)
-        back.clicked.connect(lambda: self._show_page("library"))
-        hl.addWidget(back)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #3a3a3a;")
-        hl.addWidget(sep)
-
-        self._editor_title = QLabel("Aucun livre sélectionné")
-        self._editor_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        hl.addWidget(self._editor_title)
-        hl.addStretch()
-
-        vl.addWidget(header)
-        vl.addWidget(self._hline())
-
         self.editor_panel = EditorPanel(self)
+        self.editor_panel.back_requested.connect(lambda: self._show_page("library"))
         vl.addWidget(self.editor_panel, 1)
 
         self._pages["editor"] = page
@@ -401,10 +507,10 @@ class AudiobookManagerApp:
         btn = self._nav_btns.get("queue")
         if btn is None:
             return
-        if pending > 0:
-            btn.setText(f"  ▶  Conversion  ({pending})")
-        else:
-            btn.setText("  ▶  Conversion")
+        if self._sidebar_expanded:
+            btn.setText(f"   Conversion  ({pending})" if pending > 0
+                        else "   Conversion")
+        # In collapsed mode the button shows only the icon — badge not shown
 
     # ── Page 4 : Console ──────────────────────────────────────────────────
 
@@ -421,22 +527,19 @@ class AudiobookManagerApp:
     # ── Actions ────────────────────────────────────────────────────────────
 
     def _update_library(self):
-        """Recharge instantanément depuis last_library.json + library.json, sans ffprobe."""
         books = self.scanner.load_last_books()
         self.library_panel.populate(books)
         n = len(books)
-        self._scan_label.setText(
-            f"{n} livre{'s' if n != 1 else ''} — mis à jour")
-        self._scan_label.setStyleSheet("color: #57cc7a; font-size: 9pt;")
+        self.library_panel.set_scan_label(
+            f"{n} livre{'s' if n != 1 else ''} — mis à jour", "#57cc7a")
 
     def _auto_load_library(self):
         books = self.scanner.load_last_books()
         if books:
             self.library_panel.populate(books)
             n = len(books)
-            self._scan_label.setText(
+            self.library_panel.set_scan_label(
                 f"{n} livre{'s' if n != 1 else ''} — cliquez Scanner pour mettre à jour")
-            self._scan_label.setStyleSheet("color: #888; font-size: 9pt;")
 
     def _open_settings(self):
         SettingsDialog(self.window, self.config_manager).exec()
@@ -453,8 +556,7 @@ class AudiobookManagerApp:
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.config_manager.reset_scan_cache()
-            self._scan_label.setText("Cache vidé — cliquez Scanner")
-            self._scan_label.setStyleSheet("color: #e8a020; font-size: 9pt;")
+            self.library_panel.set_scan_label("Cache vidé — cliquez Scanner", "#e8a020")
 
     def _start_scan(self):
         if not self.config_manager.app_config.source_folders:
@@ -464,12 +566,9 @@ class AudiobookManagerApp:
             self._open_settings()
             return
 
-        self._scan_btn.setEnabled(False)
-        self._scan_label.setText("Scan en cours…")
-        self._scan_label.setStyleSheet("color: #e8a020; font-size: 9pt;")
-        self._scan_progress.show()
+        self.library_panel.set_scanning(True)
+        self.library_panel.set_scan_label("Scan en cours…", "#e8a020")
 
-        self._scan_progress.setValue(0)
         self._scan_thread = _ScanThread(self.scanner)
         self._scan_thread.progress.connect(self._on_scan_progress)
         self._scan_thread.finished.connect(self._on_scan_done)
@@ -477,22 +576,17 @@ class AudiobookManagerApp:
 
     def _on_scan_progress(self, current: int, total: int, msg: str):
         pct = int(current / total * 100) if total > 0 else 0
-        self._scan_progress.setValue(pct)
-        self._scan_label.setText(msg[:70])
+        self.library_panel.set_scan_progress(pct, msg)
 
     def _on_scan_done(self, books: List[BookEntry]):
-        self._scan_progress.setValue(100)
-        self._scan_progress.hide()
-        self._scan_btn.setEnabled(True)
+        self.library_panel.set_scanning(False)
         self.library_panel.populate(books)
         n = len(books)
-        self._scan_label.setText(
-            f"{n} livre{'s' if n != 1 else ''} trouvé{'s' if n != 1 else ''}")
-        self._scan_label.setStyleSheet("color: #57cc7a; font-size: 9pt;")
+        self.library_panel.set_scan_label(
+            f"{n} livre{'s' if n != 1 else ''} trouvé{'s' if n != 1 else ''}", "#57cc7a")
 
     def on_book_selected(self, book: BookEntry):
         self.editor_panel.load_book(book)
-        self._editor_title.setText(book.display_title)
         self._show_page("editor")
 
     def add_to_queue(self, book: BookEntry):

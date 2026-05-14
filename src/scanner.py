@@ -475,6 +475,7 @@ class Scanner:
             # Si le snapshot n'a pas de sources mais que le fichier de sortie existe,
             # on crée une source synthétique pour que le livre survive au filtre
             # `kept_previous` lors du prochain scan incrémental.
+            _source_is_output = False
             if not sources and out_path and os.path.isfile(out_path):
                 try:
                     size_mb = round(os.path.getsize(out_path) / (1024 * 1024), 1)
@@ -489,8 +490,9 @@ class Scanner:
                 if updated:
                     cache_dirty = True
                 sources = [real]
+                _source_is_output = True
 
-            books.append(BookEntry(
+            book = BookEntry(
                 id=snap["id"],
                 detected_author=snap.get("detected_author", ""),
                 detected_series=snap.get("detected_series", ""),
@@ -501,7 +503,9 @@ class Scanner:
                 output_m4b_path=out_path,
                 status=status,
                 merged_from=snap.get("merged_from", []),
-            ))
+            )
+            book.source_is_output = _source_is_output
+            books.append(book)
 
         # Récupérer les livres orphelins : présents dans library.json mais absents
         # de last_library.json (sources perdues ou jamais scannées). On les restitue
@@ -532,7 +536,7 @@ class Scanner:
             source, updated = self._enrich_synthetic_source(synth)
             if updated:
                 cache_dirty = True
-            books.append(BookEntry(
+            orphan = BookEntry(
                 id=book_id,
                 detected_author=book_dict.get("detected_author", ""),
                 detected_series=book_dict.get("detected_series", ""),
@@ -543,7 +547,9 @@ class Scanner:
                 output_m4b_path=out_path,
                 status="done",
                 merged_from=book_dict.get("merged_from", []),
-            ))
+            )
+            orphan.source_is_output = True
+            books.append(orphan)
 
         mp3_index = self._build_mp3_output_index()
         for book in books:
@@ -597,6 +603,18 @@ class Scanner:
         """progress_cb(current: int, total: int, msg: str) — appelé à chaque source analysée."""
         ignored = self.cfg.get_ignore_paths()
 
+        # Chemins manuellement exclus (scan_ignore_paths) — avec correspondance de préfixe
+        # pour les dossiers. Séparés de `ignored` car on ne filtre pas les livres existants
+        # sur les output_m4b_path (ce serait contre-productif pour les orphelins).
+        manual_excl_norm = {
+            os.path.normcase(os.path.abspath(p))
+            for p in self.cfg.app_config.scan_ignore_paths if p
+        }
+
+        def _in_manual_excl(p: str) -> bool:
+            np = os.path.normcase(os.path.abspath(p))
+            return any(np == e or np.startswith(e + os.sep) for e in manual_excl_norm)
+
         if incremental:
             previous_books = self.load_last_books()
         else:
@@ -610,15 +628,58 @@ class Scanner:
                 if os.path.exists(s.path):
                     known_paths.add(os.path.normcase(os.path.abspath(s.path)))
 
-        # Filtrer les anciens livres : retirer uniquement les sources dont le fichier
-        # n'existe plus sur disque. On ne filtre PAS sur `ignored` ici — quand le
-        # dossier source et le dossier de sortie sont identiques, le chemin de sortie
-        # se retrouverait dans `ignored` et ferait disparaître les livres existants.
+        # Filtrer les anciens livres :
+        # - retirer les sources dont le fichier n'existe plus sur disque
+        # - retirer les sources dans un dossier manuellement exclu (scan_ignore_paths)
+        # On ne filtre PAS sur output_m4b_path — quand le dossier source et le dossier
+        # de sortie sont identiques, le chemin de sortie se retrouverait dans `ignored`
+        # et ferait disparaître les livres existants.
+        # Paths de sortie M4B connus — on les filtre des sources "réelles" pour éviter
+        # qu'un livre ait à la fois sa source MP3 ET son propre M4B de sortie comme source.
+        # Fallback orphelin : si plus aucune source réelle ne subsiste, on conserve
+        # le M4B de sortie pour que le livre reste visible dans la bibliothèque.
+        output_paths_norm = {
+            os.path.normcase(os.path.abspath(e.get("output_m4b_path", "")))
+            for e in self.cfg._library.values() if e.get("output_m4b_path")
+        }
+
+        def _is_collection_folder(p: str) -> bool:
+            """True si le dossier contient des sous-dossiers avec des fichiers audio.
+            Un tel dossier est un dossier de collection (auteur), pas un livre."""
+            if not os.path.isdir(p):
+                return False
+            try:
+                return any(
+                    any(os.path.splitext(f)[1].lower() in AUDIO_EXTS
+                        for f in os.listdir(os.path.join(p, d)))
+                    for d in os.listdir(p)
+                    if os.path.isdir(os.path.join(p, d)) and not d.startswith(".")
+                )
+            except OSError:
+                return False
+
         kept_previous: List[BookEntry] = []
         for b in previous_books:
-            b.sources = [s for s in b.sources if os.path.exists(s.path)]
-            if b.sources:
+            real_sources = [
+                s for s in b.sources
+                if os.path.exists(s.path)
+                and not _in_manual_excl(s.path)
+                and os.path.normcase(os.path.abspath(s.path)) not in output_paths_norm
+                and not _is_collection_folder(s.path)
+            ]
+            if real_sources:
+                b.sources = real_sources
                 kept_previous.append(b)
+            else:
+                # Fallback orphelin : garder uniquement les fichiers (ex. M4B de sortie),
+                # pas les dossiers de collection qui ont été filtrés ci-dessus.
+                fallback = [s for s in b.sources
+                            if os.path.exists(s.path)
+                            and not _in_manual_excl(s.path)
+                            and not _is_collection_folder(s.path)]
+                if fallback:
+                    b.sources = fallback
+                    kept_previous.append(b)
 
         raw: List[Tuple[str, str, str, AudioInfo]] = []
         path_fps: Dict[str, str] = {}
@@ -643,10 +704,10 @@ class Scanner:
 
             if folder.structured:
                 raw.extend(self._scan_structured(
-                    folder, _tick, path_fps, skip_set))
+                    folder, _tick, path_fps, skip_set, manual_excl_norm))
             else:
                 raw.extend(self._scan_unstructured(
-                    folder, _tick, path_fps, skip_set))
+                    folder, _tick, path_fps, skip_set, manual_excl_norm))
 
         # Conserver dans le cache les paths utilisés par les livres déjà connus
         # (sinon `cleanup_cache` les supprimerait).
@@ -810,16 +871,25 @@ class Scanner:
     # ------------------------------------------------------------------
 
     def _scan_structured(self, folder: FolderConfig, progress_cb,
-                         path_fps: dict, skip_set: set) -> List[Tuple]:
+                         path_fps: dict, skip_set: set,
+                         manual_excl: set = None) -> List[Tuple]:
         results = []
         root = folder.path
 
         def _is_skipped(p: str) -> bool:
             return os.path.normcase(os.path.abspath(p)) in skip_set
 
+        def _in_prefix_excl(p: str) -> bool:
+            if not manual_excl:
+                return False
+            np = os.path.normcase(os.path.abspath(p))
+            return any(np == e or np.startswith(e + os.sep) for e in manual_excl)
+
         for author_name in sorted(os.listdir(root)):
             author_path = os.path.join(root, author_name)
             if not os.path.isdir(author_path) or author_name.startswith("."):
+                continue
+            if _in_prefix_excl(author_path):
                 continue
 
             for sub in sorted(os.listdir(author_path)):
@@ -827,6 +897,8 @@ class Scanner:
                 if not os.path.isdir(sub_path):
                     continue
                 if _is_skipped(sub_path):
+                    continue
+                if _in_prefix_excl(sub_path):
                     continue
 
                 audio_files = [
@@ -858,6 +930,8 @@ class Scanner:
                         vol_path = os.path.join(sub_path, vol)
                         if _is_skipped(vol_path):
                             continue
+                        if _in_prefix_excl(vol_path):
+                            continue
                         vol_files = [
                             f for f in os.listdir(vol_path)
                             if os.path.splitext(f)[1].lower() in AUDIO_EXTS
@@ -879,20 +953,32 @@ class Scanner:
         return results
 
     def _scan_unstructured(self, folder: FolderConfig, progress_cb,
-                           path_fps: dict, skip_set: set) -> List[Tuple]:
+                           path_fps: dict, skip_set: set,
+                           manual_excl: set = None) -> List[Tuple]:
         results = []
         root = folder.path
 
         def _is_skipped(p: str) -> bool:
             return os.path.normcase(os.path.abspath(p)) in skip_set
 
+        def _is_exact_excl(p: str) -> bool:
+            """Correspondance exacte uniquement — ne bloque pas la descente dans les sous-dossiers."""
+            if not manual_excl:
+                return False
+            return os.path.normcase(os.path.abspath(p)) in manual_excl
+
         for dirpath, dirnames, filenames in os.walk(root):
-            # Skip les sous-dossiers déjà connus (pas de descente inutile)
+            # Skip les sous-dossiers déjà connus (pas de descente inutile).
+            # Note : on ne filtre PAS manual_excl ici — on veut descendre dans
+            # les sous-dossiers d'un dossier exclu (ex. Bernard Werber) pour
+            # atteindre les vrais livres qui s'y trouvent.
             dirnames[:] = [d for d in sorted(dirnames)
                            if not d.startswith(".")
                            and not _is_skipped(os.path.join(dirpath, d))]
 
             if _is_skipped(dirpath):
+                continue
+            if _is_exact_excl(dirpath):
                 continue
 
             audio_files = [
@@ -918,6 +1004,18 @@ class Scanner:
                         results.append((title, author, narrator, info))
 
             elif audio_files:
+                # Si des sous-dossiers contiennent eux aussi des fichiers audio,
+                # ce dossier est une collection (auteur), pas un livre : on le
+                # saute et on laisse os.walk traiter chaque sous-dossier seul.
+                has_audio_subdirs = any(
+                    any(os.path.splitext(f)[1].lower() in AUDIO_EXTS
+                        for f in os.listdir(os.path.join(dirpath, d)))
+                    for d in dirnames
+                    if os.path.isdir(os.path.join(dirpath, d))
+                )
+                if has_audio_subdirs:
+                    continue
+
                 fp = _fingerprint(dirpath)
                 path_fps[dirpath] = fp
                 info = self._get_source_info(

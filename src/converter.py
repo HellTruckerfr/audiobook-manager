@@ -532,6 +532,22 @@ class Converter:
         log(f"✓  {n} fichier{'s' if n != 1 else ''} MP3 — {total_mb:.1f} MB", "ok")
         done_cb(True, output_dir)
 
+    def _select_m4b_source(self, book: BookEntry):
+        """Sélectionne la meilleure source pour l'encodage M4B en excluant
+        les dossiers marqués 'mp3_only'."""
+        mp3_only_labels = {
+            f.label for f in self.cfg.app_config.source_folders if f.mp3_only
+        }
+        candidates = [s for s in book.sources if s.folder_label not in mp3_only_labels]
+        if not candidates:
+            return book.selected_source  # fallback si toutes les sources sont mp3_only
+        sel = book.config.selected_source_label
+        if sel:
+            for s in candidates:
+                if s.path == sel or s.folder_label == sel:
+                    return s
+        return max(candidates, key=lambda s: s.quality_score)
+
     def _run(self, book, output_path, progress_cb, done_cb, log_cb):
         def log(msg, level="info"):
             if log_cb:
@@ -539,9 +555,17 @@ class Converter:
 
         tmp = tempfile.mkdtemp(prefix="abm_")
         try:
-            src = book.selected_source
+            src = self._select_m4b_source(book)
             if not src:
                 done_cb(False, "Aucune source sélectionnée")
+                return
+
+            # Guard : source == fichier de sortie → lecture et écriture du même fichier
+            if (os.path.isfile(src.path) and output_path
+                    and os.path.normcase(os.path.abspath(src.path))
+                       == os.path.normcase(os.path.abspath(output_path))):
+                done_cb(False,
+                        "Source identique au fichier de sortie — utilisez 'Méta' pour mettre à jour les tags")
                 return
 
             config = book.config

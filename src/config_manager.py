@@ -18,6 +18,7 @@ class FolderConfig:
     label: str
     path: str
     structured: bool = False
+    mp3_only: bool = False   # si True, ignoré comme source pour l'encodage M4B
 
 
 DEFAULT_METADATA_REQUIRED = ["title", "author", "narrator", "year", "asin", "cover_path"]
@@ -85,6 +86,7 @@ class ConfigManager:
                         label=fd["label"],
                         path=fd["path"],
                         structured=fd.get("structured", False),
+                        mp3_only=fd.get("mp3_only", False),
                     )
                     for fd in data.get("source_folders", [])
                 ],
@@ -121,7 +123,8 @@ class ConfigManager:
     def save_config(self):
         data = {
             "source_folders": [
-                {"label": f.label, "path": f.path, "structured": f.structured}
+                {"label": f.label, "path": f.path,
+                 "structured": f.structured, "mp3_only": f.mp3_only}
                 for f in self.app_config.source_folders
             ],
             "output_m4b": self.app_config.output_m4b,

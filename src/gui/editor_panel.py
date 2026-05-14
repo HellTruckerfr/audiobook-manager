@@ -88,6 +88,8 @@ def _first_audio(folder: str) -> str:
 
 
 class EditorPanel(QWidget):
+    back_requested = pyqtSignal()
+
     def __init__(self, app):
         super().__init__()
         self.app   = app
@@ -97,50 +99,85 @@ class EditorPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        layout.addWidget(self._build_source_bar())
+        layout.addWidget(self._build_top_area())
         layout.addWidget(self._build_tabs(), 1)
         layout.addWidget(self._build_bottom_bar())
         self._load_title_source("detected")
 
-    # ── Barre source ──────────────────────────────────────────────────
+    # ── Zone supérieure : titre + source / bouton retour ─────────────
 
-    def _build_source_bar(self) -> QWidget:
-        bar = QWidget()
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(8, 6, 8, 6)
-        bl.setSpacing(8)
+    def _build_top_area(self) -> QWidget:
+        wrapper = QWidget()
+        wl = QVBoxLayout(wrapper)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.setSpacing(0)
 
-        bl.addWidget(QLabel("Source :"))
+        # ── Ligne 1 : titre du livre  +  source ──────────────────────
+        header = QWidget()
+        header.setFixedHeight(48)
+        header.setStyleSheet("background: #1e1e1e;")
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(12, 6, 12, 6)
+        hl.setSpacing(12)
+
+        self._title_lbl = QLabel("Aucun livre sélectionné")
+        self._title_lbl.setStyleSheet(
+            "color: #eee; font-size: 11pt; font-weight: bold; font-family: 'Segoe UI';")
+        hl.addWidget(self._title_lbl)
+        hl.addStretch()
+
+        hl.addWidget(QLabel("Source :"))
         self._source_cb = QComboBox()
-        self._source_cb.setMinimumWidth(280)
+        self._source_cb.setMinimumWidth(260)
         self._source_cb.currentIndexChanged.connect(self._on_source_changed)
-        bl.addWidget(self._source_cb)
+        hl.addWidget(self._source_cb)
 
         self._quality_lbl = QLabel("")
         self._quality_lbl.setStyleSheet("color: #888; font-size: 8pt;")
-        bl.addWidget(self._quality_lbl)
+        hl.addWidget(self._quality_lbl)
+
+        self._tag_status = QLabel("")
+        self._tag_status.setStyleSheet("font-size: 9pt;")
+        hl.addWidget(self._tag_status)
+
+        wl.addWidget(header)
+
+        # ── Ligne 2 : ← Bibliothèque  +  Importer les tags ───────────
+        back_bar = QWidget()
+        back_bar.setFixedHeight(40)
+        back_bar.setStyleSheet("background: #181818;")
+        bl = QHBoxLayout(back_bar)
+        bl.setContentsMargins(8, 4, 8, 4)
+        bl.setSpacing(8)
+
+        back_btn = QPushButton("←  Bibliothèque")
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.setStyleSheet("""
+            QPushButton {
+                color: #4a9eff; font-size: 10pt; font-weight: bold;
+                border: 1px solid #2a5a9a; border-radius: 4px;
+                padding: 2px 14px; background: #1a2a3a;
+            }
+            QPushButton:hover   { background: #1e3550; color: #77bbff; }
+            QPushButton:pressed { background: #152840; }
+        """)
+        back_btn.clicked.connect(self.back_requested)
+        bl.addWidget(back_btn)
 
         load_btn = QPushButton("⬇ Importer les tags…")
         load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         load_btn.clicked.connect(self._open_tag_import)
         bl.addWidget(load_btn)
 
-        self._tag_status = QLabel("")
-        self._tag_status.setStyleSheet("font-size: 9pt;")
-        bl.addWidget(self._tag_status)
-
         bl.addStretch()
+
+        wl.addWidget(back_bar)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color: #333;")
-
-        wrapper = QWidget()
-        wl = QVBoxLayout(wrapper)
-        wl.setContentsMargins(0, 0, 0, 0)
-        wl.setSpacing(0)
-        wl.addWidget(bar)
         wl.addWidget(sep)
+
         return wrapper
 
     # ── Onglets ───────────────────────────────────────────────────────
@@ -150,6 +187,7 @@ class EditorPanel(QWidget):
 
         self._tabs.addTab(self._build_meta_tab(),  "Métadonnées")
         self._tabs.addTab(self._build_chap_tab(),  "Chapitres")
+        self._tabs.addTab(self._build_desc_tab(),  "Description")
         self._tabs.addTab(self._build_cover_tab(), "Cover")
 
         return self._tabs
@@ -181,51 +219,60 @@ class EditorPanel(QWidget):
             self._vars[key] = field_w
             form.addRow(f"{label} :", field_w)
 
-        outer.addLayout(form)
+        # Bitrate + Sample rate + Watermark + IgnoreCheck — tout sur une ligne alignée
+        tech_w = QWidget()
+        tl = QHBoxLayout(tech_w)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(8)
 
-        # Bitrate + sample rate
-        row = QHBoxLayout()
-        row.setSpacing(16)
-        row.addWidget(QLabel("Bitrate :"))
         self._bitrate_cb = QComboBox()
         self._bitrate_cb.addItems(["64k", "96k", "128k", "192k", "256k", "320k"])
         self._bitrate_cb.setCurrentText("128k")
-        self._bitrate_cb.setMaximumWidth(100)
-        row.addWidget(self._bitrate_cb)
+        self._bitrate_cb.setMaximumWidth(90)
+        tl.addWidget(self._bitrate_cb)
 
-        row.addWidget(QLabel("Sample rate :"))
+        tl.addWidget(QLabel("Sample rate :"))
         self._sr_cb = QComboBox()
         self._sr_cb.addItems(["22050", "44100", "48000"])
         self._sr_cb.setCurrentText("44100")
-        self._sr_cb.setMaximumWidth(100)
-        row.addWidget(self._sr_cb)
-        row.addStretch()
-        outer.addLayout(row)
+        self._sr_cb.setMaximumWidth(90)
+        tl.addWidget(self._sr_cb)
 
-        # Description (résumé)
-        desc_header = QHBoxLayout()
-        desc_header.addWidget(QLabel("Description :"))
-        self._fetch_btn = QPushButton("📥 Fetch Amazon")
-        self._fetch_btn.setFixedHeight(22)
-        self._fetch_btn.clicked.connect(self._fetch_from_amazon)
-        desc_header.addStretch()
-        desc_header.addWidget(self._fetch_btn)
-        outer.addLayout(desc_header)
-        self._desc_edit = QTextEdit()
-        self._desc_edit.setMaximumHeight(90)
-        self._desc_edit.setPlaceholderText("Résumé du livre…")
-        outer.addWidget(self._desc_edit)
+        tl.addSpacing(16)
+        self._watermark_cb = QCheckBox("Watermark")
+        tl.addWidget(self._watermark_cb)
 
-        self._watermark_cb = QCheckBox("Watermark sur la cover")
-        outer.addWidget(self._watermark_cb)
-
-        self._ignore_meta_cb = QCheckBox(
-            "Ignorer la vérif des méta (livre considéré « complet »)")
+        self._ignore_meta_cb = QCheckBox("Ignorer vérif méta")
         self._ignore_meta_cb.setToolTip(
             "Cache ce livre quand le filtre « Cacher livres complets » est actif,\n"
             "même si certains champs requis sont vides.")
-        outer.addWidget(self._ignore_meta_cb)
+        tl.addWidget(self._ignore_meta_cb)
+        tl.addStretch()
+
+        form.addRow("Bitrate :", tech_w)
+
+        outer.addLayout(form)
         outer.addStretch()
+
+        return w
+
+    def _build_desc_tab(self) -> QWidget:
+        w = QWidget()
+        vl = QVBoxLayout(w)
+        vl.setContentsMargins(12, 12, 12, 12)
+        vl.setSpacing(8)
+
+        top = QHBoxLayout()
+        top.addStretch()
+        self._fetch_btn = QPushButton("📥 Fetch Amazon")
+        self._fetch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fetch_btn.clicked.connect(self._fetch_from_amazon)
+        top.addWidget(self._fetch_btn)
+        vl.addLayout(top)
+
+        self._desc_edit = QTextEdit()
+        self._desc_edit.setPlaceholderText("Résumé du livre…")
+        vl.addWidget(self._desc_edit, 1)
 
         return w
 
@@ -283,38 +330,53 @@ class EditorPanel(QWidget):
 
     def _build_cover_tab(self) -> QWidget:
         w = QWidget()
-        vl = QVBoxLayout(w)
-        vl.setContentsMargins(12, 12, 12, 12)
-        vl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(0)
 
+        # Créer les boutons d'abord pour mesurer leur largeur naturelle
+        self._extract_btn = QPushButton("Extraire depuis source")
+        self._extract_btn.clicked.connect(self._extract_cover_menu)
+        self._import_btn = QPushButton("Importer image…")
+        self._import_btn.clicked.connect(self._import_cover)
+        self._delete_btn = QPushButton("Supprimer")
+        self._delete_btn.clicked.connect(self._clear_cover)
+
+        btn_w = (self._extract_btn.sizeHint().width()
+                 + self._import_btn.sizeHint().width()
+                 + self._delete_btn.sizeHint().width()
+                 + 2 * 8)   # 2 espacements de 8px
+
+        # Container centré dont la largeur = largeur des boutons = côté de l'image
+        container = QWidget()
+        container.setFixedWidth(btn_w)
+        cl = QVBoxLayout(container)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(28)
+
+        # Image carrée 1:1 — même largeur que les boutons, pas de cadre gris
         self._cover_lbl = QLabel("Aucune cover")
-        self._cover_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self._cover_lbl.setMinimumSize(300, 300)
-        self._cover_lbl.setMaximumSize(300, 300)
+        self._cover_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cover_lbl.setFixedSize(btn_w, btn_w)
         self._cover_lbl.setStyleSheet(
             "border: 1px solid #3a3a3a; color: #888; font-size: 10pt;")
-        vl.addWidget(self._cover_lbl)
+        cl.addWidget(self._cover_lbl)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-
-        self._extract_btn = QPushButton("Extraire depuis source")
-        self._extract_btn.clicked.connect(self._extract_cover_menu)
         btn_row.addWidget(self._extract_btn)
-
-        for text, fn in [
-            ("Importer image…", self._import_cover),
-            ("Supprimer",       self._clear_cover),
-        ]:
-            b = QPushButton(text)
-            b.clicked.connect(fn)
-            btn_row.addWidget(b)
-        vl.addLayout(btn_row)
+        btn_row.addWidget(self._import_btn)
+        btn_row.addWidget(self._delete_btn)
+        cl.addLayout(btn_row)
 
         self._cover_path_lbl = QLabel("")
         self._cover_path_lbl.setStyleSheet("color: #888; font-size: 8pt;")
         self._cover_path_lbl.setWordWrap(True)
-        vl.addWidget(self._cover_path_lbl)
+        cl.addWidget(self._cover_path_lbl)
+
+        outer.addWidget(container, 0,
+                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        outer.addStretch()
 
         return w
 
@@ -330,50 +392,54 @@ class EditorPanel(QWidget):
         bl.setContentsMargins(8, 6, 8, 6)
         bl.setSpacing(8)
 
-        save = QPushButton("💾 Sauvegarder")
-        save.clicked.connect(self._save_config)
-        bl.addWidget(save)
+        _btn = (
+            "QPushButton {"
+            "  background: #2a2a2a; color: #ccc; border: 1px solid #444;"
+            "  border-radius: 4px; padding: 5px 14px; font-size: 9pt;"
+            "}"
+            "QPushButton:hover    { background: #383838; color: #f3f3f3; border-color: #666; }"
+            "QPushButton:pressed  { background: #1a1a1a; }"
+            "QPushButton:disabled { background: #1e1e1e; color: #555; border-color: #333; }"
+        )
 
-        bl.addSpacing(16)
-
-        _nav_style = """
-            QPushButton {
-                background: #2a2a2a; color: #ccc; border: 1px solid #444;
-                padding: 4px 14px; font-size: 9pt;
-            }
-            QPushButton:hover   { background: #383838; color: #f3f3f3; border-color: #666; }
-            QPushButton:pressed { background: #0067c0; color: white; }
-            QPushButton:disabled { background: #1e1e1e; color: #555; border-color: #333; }
-        """
+        # Gauche
         prev_btn = QPushButton("◀  Livre précédent")
         prev_btn.setToolTip("Livre précédent (sauvegarde automatique)")
         prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        prev_btn.setStyleSheet(_nav_style)
+        prev_btn.setStyleSheet(_btn)
         prev_btn.clicked.connect(lambda: self.navigate(-1))
         bl.addWidget(prev_btn)
 
-        next_btn = QPushButton("Livre suivant  ▶")
-        next_btn.setToolTip("Livre suivant (sauvegarde automatique)")
-        next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        next_btn.setStyleSheet(_nav_style)
-        next_btn.clicked.connect(lambda: self.navigate(1))
-        bl.addWidget(next_btn)
+        bl.addStretch()
+
+        # Centre
+        save = QPushButton("💾  Sauvegarder")
+        save.setCursor(Qt.CursorShape.PointingHandCursor)
+        save.setStyleSheet(_btn)
+        save.clicked.connect(self._save_config)
+        bl.addWidget(save)
+
+        convert_btn = QPushButton("⚡  Convertir maintenant")
+        convert_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        convert_btn.setStyleSheet(_btn)
+        convert_btn.clicked.connect(self._convert_now)
+        bl.addWidget(convert_btn)
+
+        add_btn = QPushButton("▶  Ajouter à la file")
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.setStyleSheet(_btn)
+        add_btn.clicked.connect(self._add_to_queue)
+        bl.addWidget(add_btn)
 
         bl.addStretch()
 
-        self._queue_cb = QCheckBox("Dans la file de conversion")
-        self._queue_cb.setToolTip(
-            "Cocher pour ajouter ce livre à la file ; décocher pour l'en retirer.")
-        self._queue_cb.toggled.connect(self._on_queue_toggled)
-        bl.addWidget(self._queue_cb)
-
-        for text, fn in [
-            ("⚡ Convertir maintenant", self._convert_now),
-            ("▶ Ajouter à la file",    self._add_to_queue),
-        ]:
-            b = QPushButton(text)
-            b.clicked.connect(fn)
-            bl.addWidget(b)
+        # Droite
+        next_btn = QPushButton("Livre suivant  ▶")
+        next_btn.setToolTip("Livre suivant (sauvegarde automatique)")
+        next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        next_btn.setStyleSheet(_btn)
+        next_btn.clicked.connect(lambda: self.navigate(1))
+        bl.addWidget(next_btn)
 
         wrapper = QWidget()
         wl = QVBoxLayout(wrapper)
@@ -394,6 +460,7 @@ class EditorPanel(QWidget):
         self._book = book
         cfg = book.config
 
+        self._title_lbl.setText(book.display_title)
         self._refresh_combo_items()
         for key, le in self._vars.items():
             le.setText(getattr(cfg, key, ""))
@@ -434,29 +501,7 @@ class EditorPanel(QWidget):
             self.app.config_manager.save_scan_cache()
 
     def refresh_queue_state(self):
-        """Synchronise la checkbox « Dans la file » avec l'état réel de la queue."""
-        if self._book is None:
-            return
-        queue = getattr(self.app, "queue_panel", None)
-        if queue is None:
-            return
-        want = queue.is_book_queued(self._book.id)
-        self._queue_cb.blockSignals(True)
-        self._queue_cb.setChecked(want)
-        self._queue_cb.blockSignals(False)
-
-    def _on_queue_toggled(self, checked: bool):
-        if self._book is None:
-            return
-        queue = getattr(self.app, "queue_panel", None)
-        if queue is None:
-            return
-        if checked:
-            if not queue.is_book_queued(self._book.id):
-                self._apply_to_config()
-                queue.add_job(self._book)
-        else:
-            queue.remove_pending_by_book(self._book.id)
+        pass  # checkbox supprimée — gardé pour compatibilité app.py
 
     def _populate_source_cb(self, book: BookEntry):
         self._source_cb.blockSignals(True)
@@ -641,14 +686,17 @@ class EditorPanel(QWidget):
     # ── Cover ─────────────────────────────────────────────────────────
 
     def _load_cover(self, path: str):
+        s = self._cover_lbl.width() or 300
         if path and os.path.exists(path):
             pixmap = QPixmap(path)
             if not pixmap.isNull():
-                pixmap = pixmap.scaled(
-                    300, 300,
-                    Qt.AspectRatioMode.KeepAspectRatio,
+                px = pixmap.scaled(
+                    s, s,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                     Qt.TransformationMode.SmoothTransformation)
-                self._cover_lbl.setPixmap(pixmap)
+                x = (px.width()  - s) // 2
+                y = (px.height() - s) // 2
+                self._cover_lbl.setPixmap(px.copy(x, y, s, s))
                 self._cover_lbl.setText("")
                 return
         self._cover_lbl.clear()
