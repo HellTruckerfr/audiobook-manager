@@ -3,7 +3,9 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QPushButton, QLabel, QDialog, QDialogButtonBox,
     QLineEdit, QMessageBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
+
+from .icon_utils import get_icon
 
 
 _FIELDS = [
@@ -58,12 +60,16 @@ class ReferentialPanel(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        rename_btn = QPushButton("✎ Renommer")
+        rename_btn = QPushButton("  Renommer")
+        rename_btn.setIcon(get_icon("Modifier.ico"))
+        rename_btn.setIconSize(QSize(16, 16))
         rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         rename_btn.clicked.connect(lambda _, f=field: self._rename(f))
         btn_row.addWidget(rename_btn)
 
-        delete_btn = QPushButton("✕ Supprimer")
+        delete_btn = QPushButton("  Supprimer")
+        delete_btn.setIcon(get_icon("Annuler.ico"))
+        delete_btn.setIconSize(QSize(16, 16))
         delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         delete_btn.clicked.connect(lambda _, f=field: self._delete(f))
         btn_row.addWidget(delete_btn)

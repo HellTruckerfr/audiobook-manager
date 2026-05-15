@@ -8,8 +8,9 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QFrame, QMenu, QProgressBar, QComboBox, QStyle, QStyleOptionButton,
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QPoint, QRect
+from PyQt6.QtCore import Qt, QObject, QSize, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QColor, QAction
+from .icon_utils import get_icon
 from PyQt6.QtWidgets import QApplication
 
 from ..models import ConversionJob, BookEntry
@@ -22,10 +23,10 @@ STATUS_COLOR = {
     "cancelled":  "#555",
 }
 STATUS_ICON = {
-    "queued":     "○",
-    "converting": "⟳",
-    "done":       "✓",
-    "error":      "✗",
+    "queued":     "En-attente.ico",
+    "converting": "En-cours.ico",
+    "done":       "OK.ico",
+    "error":      "Erreur.ico",
     "cancelled":  "—",
 }
 
@@ -140,7 +141,8 @@ class QueuePanel(QWidget):
         ctrl = QHBoxLayout()
         ctrl.setSpacing(6)
 
-        self._btn_start = QPushButton("▶  Lancer la conversion")
+        self._btn_start = QPushButton("  Lancer la conversion")
+        self._btn_start.setIcon(get_icon("Lancer.ico")); self._btn_start.setIconSize(QSize(18, 18))
         self._btn_start.setStyleSheet("""
             QPushButton {
                 background: #0067c0; color: white; border: none;
@@ -174,13 +176,15 @@ class QueuePanel(QWidget):
         self._fmt_combo.currentTextChanged.connect(self._on_format_changed)
         ctrl.addWidget(self._fmt_combo)
 
-        btn_cancel = QPushButton("✕  Annuler en cours")
+        btn_cancel = QPushButton("  Annuler en cours")
+        btn_cancel.setIcon(get_icon("Annuler.ico")); btn_cancel.setIconSize(QSize(18, 18))
         btn_cancel.setToolTip("Annule uniquement la conversion en cours")
         btn_cancel.setStyleSheet(_BTN_STYLE)
         btn_cancel.clicked.connect(self._cancel_current)
         ctrl.addWidget(btn_cancel)
 
-        btn_clear = QPushButton("🗑  Vider terminés")
+        btn_clear = QPushButton("  Vider terminés")
+        btn_clear.setIcon(get_icon("Vider.ico")); btn_clear.setIconSize(QSize(18, 18))
         btn_clear.setStyleSheet(_BTN_STYLE)
         btn_clear.clicked.connect(self._clear_done)
         ctrl.addWidget(btn_clear)
@@ -620,7 +624,8 @@ class QueuePanel(QWidget):
         menu = QMenu(self)
 
         if job.status == "done" and job.output_path:
-            a = QAction("📂  Ouvrir dans l'Explorateur", menu)
+            a = QAction("  Ouvrir dans l'Explorateur", menu)
+            a.setIcon(get_icon("folder.ico"))
             a.triggered.connect(lambda: _open_in_explorer(job.output_path))
             menu.addAction(a)
             menu.addSeparator()
@@ -630,17 +635,20 @@ class QueuePanel(QWidget):
             err_item = self._table.item(row, COL_INFO) if row >= 0 else None
             err_text = err_item.text() if err_item else ""
             if err_text:
-                a = QAction("📋  Copier l'erreur", menu)
+                a = QAction("  Copier l'erreur", menu)
+                a.setIcon(get_icon("exportation.ico"))
                 a.triggered.connect(lambda checked=False, t=err_text: _copy_to_clipboard(t))
                 menu.addAction(a)
                 menu.addSeparator()
 
         if job.status in ("queued", "error", "cancelled", "done"):
-            menu.addAction("✕  Retirer de la file").triggered.connect(
+            _a_ret = menu.addAction("  Retirer de la file"); _a_ret.setIcon(get_icon("Annuler.ico"))
+            _a_ret.triggered.connect(
                 lambda: self._remove_job(job))
 
         if job.status == "queued":
-            menu.addAction("⚡  Démarrer maintenant").triggered.connect(self.start_all)
+            _a_now = menu.addAction("  Démarrer maintenant"); _a_now.setIcon(get_icon("Conversion.ico"))
+            _a_now.triggered.connect(self.start_all)
 
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
@@ -652,16 +660,16 @@ class QueuePanel(QWidget):
 
         removable = [j for j in jobs if j.status in ("queued", "error", "cancelled", "done")]
         if removable:
-            menu.addAction(f"✕  Retirer {len(removable)} jobs").triggered.connect(
-                lambda: [self._remove_job(j) for j in list(removable)])
+            _a_rm = menu.addAction(f"  Retirer {len(removable)} jobs"); _a_rm.setIcon(get_icon("Annuler.ico"))
+            _a_rm.triggered.connect(lambda: [self._remove_job(j) for j in list(removable)])
 
         queued = [j for j in jobs if j.status == "queued"]
         if queued:
-            menu.addAction(f"⚡  Lancer {len(queued)} jobs en attente").triggered.connect(
-                self.start_all)
+            _a_la = menu.addAction(f"  Lancer {len(queued)} jobs en attente"); _a_la.setIcon(get_icon("Conversion.ico"))
+            _a_la.triggered.connect(self.start_all)
 
         menu.addSeparator()
-        menu.addAction("☐  Tout décocher").triggered.connect(self._uncheck_all)
+        menu.addAction("  Tout décocher").triggered.connect(self._uncheck_all)
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
     def _remove_job(self, job: ConversionJob):
@@ -696,8 +704,8 @@ class QueuePanel(QWidget):
     def _set_row(self, row: int, job: ConversionJob, size: str, info: str):
         if row < 0:
             return
-        color = STATUS_COLOR.get(job.status, "#888")
-        icon  = STATUS_ICON.get(job.status, "○")
+        color    = STATUS_COLOR.get(job.status, "#888")
+        icon_fn  = STATUS_ICON.get(job.status, "")
 
         self._populating = True
         try:
@@ -712,7 +720,7 @@ class QueuePanel(QWidget):
                 self._table.setItem(row, COL_CHECK, cb)
 
             for col, text in [
-                (COL_ICON,  icon),
+                (COL_ICON,  ""),
                 (COL_TITLE, job.book.display_title),
                 (COL_AUTH,  job.book.display_author),
                 (COL_SIZE,  size),
@@ -728,6 +736,11 @@ class QueuePanel(QWidget):
                 if col == COL_ICON:
                     it.setTextAlignment(
                         Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+                    if icon_fn and icon_fn != "—":
+                        it.setIcon(get_icon(icon_fn))
+                    else:
+                        it.setIcon(get_icon("") if icon_fn == "—" else get_icon(""))
+                        it.setText("—" if icon_fn == "—" else "")
                 if col == COL_TITLE:
                     it.setData(Qt.ItemDataRole.UserRole, job.book.id)
                     # Suffixe format pour les jobs MP3

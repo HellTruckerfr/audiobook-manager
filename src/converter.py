@@ -6,8 +6,10 @@ import threading
 import tempfile
 from typing import Callable, List, Optional
 
-# Priorité basse pour les process ffmpeg parallèles (Windows only)
+# Priorité basse + pas de fenêtre console pour les process ffmpeg (Windows only)
 _BELOW_NORMAL = 0x00004000 if sys.platform == "win32" else 0
+_NO_WIN       = 0x08000000 if sys.platform == "win32" else 0
+_FF_FLAGS      = _BELOW_NORMAL | _NO_WIN
 
 from .models import BookEntry, Chapter, AudioInfo
 from .config_manager import ConfigManager
@@ -159,7 +161,7 @@ def _extract_cover(source_path: str, out_path: str) -> bool:
         r = subprocess.run(
             ["ffmpeg", "-loglevel", "error", "-i", source_path,
              "-an", "-vframes", "1", "-y", out_path],
-            capture_output=True, timeout=30
+            capture_output=True, timeout=30, creationflags=_NO_WIN,
         )
         return r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 100
     except Exception:
@@ -174,7 +176,7 @@ def _apply_watermark(cover_path: str, logo_path: str, font_path: str, out_path: 
              "-i", cover_path, "-i", logo_path,
              "-filter_complex", filt,
              "-map", "[out]", "-frames:v", "1", "-q:v", "2", "-y", out_path],
-            capture_output=True, timeout=30
+            capture_output=True, timeout=30, creationflags=_NO_WIN,
         )
         return r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 100
     except Exception:
@@ -191,7 +193,8 @@ def _best_aac_encoder() -> str:
         return _aac_encoder_cache
     try:
         r = subprocess.run(
-            ["ffmpeg", "-encoders"], capture_output=True, text=True, timeout=10
+            ["ffmpeg", "-encoders"], capture_output=True, text=True, timeout=10,
+            creationflags=_NO_WIN,
         )
         out = r.stdout
         if "libfdk_aac" in out:
@@ -321,7 +324,7 @@ class Converter:
                 r = subprocess.run(
                     args, capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
-                    timeout=300, creationflags=_BELOW_NORMAL,
+                    timeout=300, creationflags=_FF_FLAGS,
                 )
             except subprocess.TimeoutExpired:
                 log("✗  Timeout", "error")
@@ -474,7 +477,7 @@ class Converter:
                 r = subprocess.run(args, capture_output=True, text=True,
                                    encoding="utf-8", errors="replace",
                                    timeout=_per_ch_timeout,
-                                   creationflags=_BELOW_NORMAL)
+                                   creationflags=_FF_FLAGS)
             except subprocess.TimeoutExpired:
                 timed_out = True
             success = (not timed_out and r is not None
@@ -730,7 +733,7 @@ class Converter:
                 r = subprocess.run(args, capture_output=True, text=True,
                                    encoding="utf-8", errors="replace",
                                    timeout=_per_ch_timeout,
-                                   creationflags=_BELOW_NORMAL)
+                                   creationflags=_FF_FLAGS)
             except subprocess.TimeoutExpired:
                 timed_out = True
             ok = (not timed_out and r is not None
@@ -892,7 +895,7 @@ class Converter:
                         ["ffmpeg", "-threads", "1", "-loglevel", "warning",
                          "-i", p(src_file)] + enc_args + ["-threads", "1", "-y", p(part)],
                         capture_output=True, text=True, encoding="utf-8", errors="replace",
-                        timeout=_per_file_timeout, creationflags=_BELOW_NORMAL,
+                        timeout=_per_file_timeout, creationflags=_FF_FLAGS,
                     )
                 except subprocess.TimeoutExpired:
                     timed_out = True
@@ -977,6 +980,7 @@ class Converter:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                creationflags=_NO_WIN,
             )
             for line in proc.stderr:
                 if self._cancel_flag.is_set():
@@ -1037,7 +1041,8 @@ def _get_m4b_chapters(m4b_path: str) -> list:
         r = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
              "-show_chapters", m4b_path],
-            capture_output=True, text=True, timeout=30, encoding="utf-8"
+            capture_output=True, text=True, timeout=30, encoding="utf-8",
+            creationflags=_NO_WIN,
         )
         if r.returncode != 0:
             return []

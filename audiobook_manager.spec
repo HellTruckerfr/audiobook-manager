@@ -43,7 +43,7 @@ exe = EXE(
     upx_exclude=[],
     console=False,
     disable_windowed_traceback=False,
-    icon='assets/icons/audiobook-manager.png',
+    icon='assets/icons/audiobook-manager.ico',
 )
 
 coll = COLLECT(

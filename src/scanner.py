@@ -1,9 +1,12 @@
 import os
 import re
 import json
+import sys
 import subprocess
 import unicodedata
 from typing import List, Dict, Optional, Callable, Tuple
+
+_NO_WIN = 0x08000000 if sys.platform == "win32" else 0
 
 from .models import AudioInfo, BookEntry, BookConfig, Chapter
 from .config_manager import ConfigManager, FolderConfig
@@ -37,7 +40,8 @@ def _run_ffprobe(path: str) -> Optional[dict]:
         r = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
              "-show_format", "-show_streams", "-show_chapters", path],
-            capture_output=True, text=True, timeout=30, encoding="utf-8"
+            capture_output=True, text=True, timeout=30, encoding="utf-8",
+            creationflags=_NO_WIN,
         )
         if r.returncode == 0:
             return json.loads(r.stdout)
@@ -185,7 +189,8 @@ def _analyze_folder_source(folder_path: str, folder_label: str) -> Optional[Audi
             r2 = subprocess.run(
                 ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
                  "-of", "csv=p=0", fp],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, timeout=10,
+                creationflags=_NO_WIN,
             )
             total_duration += float(r2.stdout.strip())
         except Exception:
@@ -282,7 +287,8 @@ def _get_chapters_from_folder(folder_path: str, config: BookConfig) -> List[Chap
             r = subprocess.run(
                 ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
                  "-of", "csv=p=0", fp],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, timeout=10,
+                creationflags=_NO_WIN,
             )
             dur = float(r.stdout.strip())
         except Exception:

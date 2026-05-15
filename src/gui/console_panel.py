@@ -5,8 +5,10 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
     QLabel, QApplication, QTabWidget,
 )
-from PyQt6.QtCore import pyqtSignal, QObject
+from PyQt6.QtCore import pyqtSignal, QObject, QSize
 from PyQt6.QtGui import QFont
+
+from .icon_utils import get_icon
 
 
 class _LogBridge(QObject):
@@ -75,12 +77,16 @@ class ConsolePanel(QWidget):
             "QTextEdit { background:#0d0d0d; color:#c0c0c0; border:none; padding:4px; }")
         text.document().setMaximumBlockCount(8000)
 
-        copy_btn = QPushButton("📋 Copier tout")
+        copy_btn = QPushButton("  Copier tout")
+        copy_btn.setIcon(get_icon("exportation.ico"))
+        copy_btn.setIconSize(QSize(16, 16))
         copy_btn.setFixedHeight(24)
         copy_btn.clicked.connect(lambda _, t=text: QApplication.clipboard().setText(t.toPlainText()))
         bl.addWidget(copy_btn)
 
-        clear_btn = QPushButton("🗑 Vider")
+        clear_btn = QPushButton("  Vider")
+        clear_btn.setIcon(get_icon("Vider.ico"))
+        clear_btn.setIconSize(QSize(16, 16))
         clear_btn.setFixedHeight(24)
         clear_btn.clicked.connect(text.clear)
         bl.addWidget(clear_btn)

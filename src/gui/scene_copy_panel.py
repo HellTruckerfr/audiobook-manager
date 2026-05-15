@@ -12,11 +12,19 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QMessageBox, QGroupBox, QStyle, QStyleOptionButton,
 )
-from PyQt6.QtCore import Qt, QObject, QRect, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtCore import Qt, QObject, QRect, QSize, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QIcon, QPixmap
 
 from ..models import BookEntry
 
+_ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "icons")
+
+
+def _icon_btn(filename: str) -> QIcon:
+    return QIcon(os.path.join(_ICONS_DIR, filename))
+
+
+_SMALL_BTN = "padding: 2px;"
 
 _LANG_MAP = {
     "FR": "FRENCH", "EN": "ENGLISH", "ES": "SPANISH",
@@ -348,7 +356,9 @@ class SceneCopyPanel(QWidget):
         self._dest_m4b_le.setPlaceholderText("Dossier de destination pour les M4B…")
         self._dest_m4b_le.editingFinished.connect(self._save_settings)
         grid.addWidget(self._dest_m4b_le, 0, 1)
-        b_m4b = QPushButton("…"); b_m4b.setFixedWidth(30)
+        b_m4b = QPushButton(); b_m4b.setFixedWidth(30)
+        b_m4b.setIcon(_icon_btn("folder.ico")); b_m4b.setIconSize(QSize(20, 20))
+        b_m4b.setStyleSheet(_SMALL_BTN)
         b_m4b.clicked.connect(lambda: self._browse_dest(self._dest_m4b_le))
         grid.addWidget(b_m4b, 0, 2)
 
@@ -358,7 +368,9 @@ class SceneCopyPanel(QWidget):
         self._dest_mp3_le.setPlaceholderText("Dossier de destination pour les MP3…")
         self._dest_mp3_le.editingFinished.connect(self._save_settings)
         grid.addWidget(self._dest_mp3_le, 1, 1)
-        b_mp3 = QPushButton("…"); b_mp3.setFixedWidth(30)
+        b_mp3 = QPushButton(); b_mp3.setFixedWidth(30)
+        b_mp3.setIcon(_icon_btn("folder.ico")); b_mp3.setIconSize(QSize(20, 20))
+        b_mp3.setStyleSheet(_SMALL_BTN)
         b_mp3.clicked.connect(lambda: self._browse_dest(self._dest_mp3_le))
         grid.addWidget(b_mp3, 1, 2)
 
@@ -402,7 +414,8 @@ class SceneCopyPanel(QWidget):
 
         reset_row = QHBoxLayout()
         reset_row.addStretch()
-        reset_btn = QPushButton("↺  Réinitialiser les templates")
+        reset_btn = QPushButton("  Réinitialiser les templates")
+        reset_btn.setIcon(_icon_btn("Réinitialiser.ico")); reset_btn.setIconSize(QSize(16, 16))
         reset_btn.clicked.connect(self._reset_templates)
         reset_row.addWidget(reset_btn)
         outer.addLayout(reset_row)
@@ -494,7 +507,8 @@ class SceneCopyPanel(QWidget):
         bl = QHBoxLayout(w)
         bl.setContentsMargins(0, 0, 0, 0)
 
-        self._copy_btn = QPushButton("📋  Copier la sélection")
+        self._copy_btn = QPushButton("  Copier la sélection")
+        self._copy_btn.setIcon(_icon_btn("exportation.ico")); self._copy_btn.setIconSize(QSize(18, 18))
         self._copy_btn.setStyleSheet("""
             QPushButton {
                 background: #0067c0; color: white; border: none;
@@ -507,12 +521,16 @@ class SceneCopyPanel(QWidget):
         self._copy_btn.clicked.connect(self._start_copy)
         bl.addWidget(self._copy_btn)
 
-        open_m4b = QPushButton("📂  M4B")
+        open_m4b = QPushButton("  M4B")
+        open_m4b.setIcon(_icon_btn("folder.ico"))
+        open_m4b.setIconSize(QSize(18, 18))
         open_m4b.setToolTip("Ouvrir le dossier M4B")
         open_m4b.clicked.connect(lambda: self._open_dest(self._dest_m4b_le))
         bl.addWidget(open_m4b)
 
-        open_mp3 = QPushButton("📂  MP3")
+        open_mp3 = QPushButton("  MP3")
+        open_mp3.setIcon(_icon_btn("folder.ico"))
+        open_mp3.setIconSize(QSize(18, 18))
         open_mp3.setToolTip("Ouvrir le dossier MP3")
         open_mp3.clicked.connect(lambda: self._open_dest(self._dest_mp3_le))
         bl.addWidget(open_mp3)

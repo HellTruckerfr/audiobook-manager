@@ -9,8 +9,10 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QTextEdit, QFrame, QTextBrowser, QComboBox,
 )
-from PyQt6.QtCore import Qt, QUrl, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QUrl, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QGuiApplication, QPixmap, QTextDocument
+
+from .icon_utils import get_icon
 
 from ..models import BookEntry
 from ..bbcode import generate_prez, bbcode_to_html
@@ -144,7 +146,9 @@ class PrezPanel(QWidget):
         self._cover_url_le.textChanged.connect(self._on_cover_url_changed)
         bl.addWidget(self._cover_url_le, 1)
 
-        self._upload_btn = QPushButton("📤 Catbox")
+        self._upload_btn = QPushButton("  Catbox")
+        self._upload_btn.setIcon(get_icon("upload.ico"))
+        self._upload_btn.setIconSize(QSize(16, 16))
         self._upload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._upload_btn.setToolTip(
             "Upload la cover locale (config.cover_path) sur catbox.moe\n"
@@ -157,7 +161,9 @@ class PrezPanel(QWidget):
         sep3.setStyleSheet("color: #444;")
         bl.addWidget(sep3)
 
-        copy_btn = QPushButton("📋 Copier")
+        copy_btn = QPushButton("  Copier")
+        copy_btn.setIcon(get_icon("exportation.ico"))
+        copy_btn.setIconSize(QSize(16, 16))
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_btn.setStyleSheet("""
             QPushButton {
@@ -502,13 +508,13 @@ class PrezPanel(QWidget):
 
     def _on_upload_done(self, url: str):
         self._upload_btn.setEnabled(True)
-        self._upload_btn.setText("📤 Catbox")
+        self._upload_btn.setText("  Catbox")
         self._cover_url_le.setText(url)   # déclenche _on_cover_url_changed → save
         self._status_lbl.setStyleSheet("color: #57cc7a; font-size: 9pt;")
         self._status_lbl.setText(f"✓ Uploadé : {url}")
 
     def _on_upload_failed(self, error: str):
         self._upload_btn.setEnabled(True)
-        self._upload_btn.setText("📤 Catbox")
+        self._upload_btn.setText("  Catbox")
         self._status_lbl.setStyleSheet("color: #e05555; font-size: 9pt;")
         self._status_lbl.setText(f"✗ Erreur upload : {error}")

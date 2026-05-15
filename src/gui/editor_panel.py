@@ -10,8 +10,9 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFrame, QMenu,
     QTextEdit, QRadioButton, QButtonGroup,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QPixmap, QColor
+from .icon_utils import get_icon
 
 from ..models import BookEntry, BookConfig, Chapter, AudioInfo
 from .tag_import_dialog import TagImportDialog
@@ -164,7 +165,8 @@ class EditorPanel(QWidget):
         back_btn.clicked.connect(self.back_requested)
         bl.addWidget(back_btn)
 
-        load_btn = QPushButton("⬇ Importer les tags…")
+        load_btn = QPushButton("  Importer les tags…")
+        load_btn.setIcon(get_icon("importation.ico")); load_btn.setIconSize(QSize(18, 18))
         load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         load_btn.clicked.connect(self._open_tag_import)
         bl.addWidget(load_btn)
@@ -264,7 +266,8 @@ class EditorPanel(QWidget):
 
         top = QHBoxLayout()
         top.addStretch()
-        self._fetch_btn = QPushButton("📥 Fetch Amazon")
+        self._fetch_btn = QPushButton("  Fetch Amazon")
+        self._fetch_btn.setIcon(get_icon("fetch.ico")); self._fetch_btn.setIconSize(QSize(18, 18))
         self._fetch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._fetch_btn.clicked.connect(self._fetch_from_amazon)
         top.addWidget(self._fetch_btn)
@@ -315,12 +318,13 @@ class EditorPanel(QWidget):
         vl.addWidget(self._chap_table, 1)
 
         btn_row = QHBoxLayout()
-        for text, fn in [
-            ("✎ Modifier titre",     self._edit_chapter),
-            ("↺ Réinitialiser",      self._reset_chapter),
-            ("↺ Tout réinitialiser", self._reset_all_chapters),
+        for icon_f, text, fn in [
+            ("Modifier.ico",      "  Modifier titre",     self._edit_chapter),
+            ("Réinitialiser.ico", "  Réinitialiser",      self._reset_chapter),
+            ("Réinitialiser.ico", "  Tout réinitialiser", self._reset_all_chapters),
         ]:
             b = QPushButton(text)
+            b.setIcon(get_icon(icon_f)); b.setIconSize(QSize(16, 16))
             b.clicked.connect(fn)
             btn_row.addWidget(b)
         btn_row.addStretch()
@@ -403,7 +407,8 @@ class EditorPanel(QWidget):
         )
 
         # Gauche
-        prev_btn = QPushButton("◀  Livre précédent")
+        prev_btn = QPushButton("  Livre précédent")
+        prev_btn.setIcon(get_icon("Précédent.ico")); prev_btn.setIconSize(QSize(18, 18))
         prev_btn.setToolTip("Livre précédent (sauvegarde automatique)")
         prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         prev_btn.setStyleSheet(_btn)
@@ -413,19 +418,22 @@ class EditorPanel(QWidget):
         bl.addStretch()
 
         # Centre
-        save = QPushButton("💾  Sauvegarder")
+        save = QPushButton("  Sauvegarder")
+        save.setIcon(get_icon("Sauvegarder.ico")); save.setIconSize(QSize(18, 18))
         save.setCursor(Qt.CursorShape.PointingHandCursor)
         save.setStyleSheet(_btn)
         save.clicked.connect(self._save_config)
         bl.addWidget(save)
 
-        convert_btn = QPushButton("⚡  Convertir maintenant")
+        convert_btn = QPushButton("  Convertir maintenant")
+        convert_btn.setIcon(get_icon("Conversion.ico")); convert_btn.setIconSize(QSize(18, 18))
         convert_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         convert_btn.setStyleSheet(_btn)
         convert_btn.clicked.connect(self._convert_now)
         bl.addWidget(convert_btn)
 
-        add_btn = QPushButton("▶  Ajouter à la file")
+        add_btn = QPushButton("  Ajouter à la file")
+        add_btn.setIcon(get_icon("Lancer.ico")); add_btn.setIconSize(QSize(18, 18))
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.setStyleSheet(_btn)
         add_btn.clicked.connect(self._add_to_queue)
@@ -434,7 +442,9 @@ class EditorPanel(QWidget):
         bl.addStretch()
 
         # Droite
-        next_btn = QPushButton("Livre suivant  ▶")
+        next_btn = QPushButton("Livre suivant  ")
+        next_btn.setIcon(get_icon("Lancer.ico")); next_btn.setIconSize(QSize(18, 18))
+        next_btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         next_btn.setToolTip("Livre suivant (sauvegarde automatique)")
         next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         next_btn.setStyleSheet(_btn)
@@ -810,11 +820,11 @@ class EditorPanel(QWidget):
         if cover_url and self._book and not self._book.config.cover_url:
             self._book.config.cover_url = cover_url
         self._fetch_btn.setEnabled(True)
-        self._fetch_btn.setText("📥 Fetch Amazon")
+        self._fetch_btn.setText("  Fetch Amazon")
 
     def _on_fetch_failed(self):
         self._fetch_btn.setEnabled(True)
-        self._fetch_btn.setText("📥 Fetch Amazon")
+        self._fetch_btn.setText("  Fetch Amazon")
 
     def _save_config(self):
         if not self._book:

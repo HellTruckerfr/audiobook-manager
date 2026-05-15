@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QEvent, QSize
-from PyQt6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QImage
+from PyQt6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QPainter
 
 from ..config_manager import ConfigManager
 from ..scanner import Scanner
@@ -26,43 +26,7 @@ from .referential_panel import ReferentialPanel
 from .theme import DARK_STYLESHEET
 
 def _auto_icon(path: str) -> QIcon:
-    """Load icon and trim transparent borders to normalize visual weight."""
-    pix = QPixmap(path)
-    if pix.isNull():
-        return QIcon()
-
-    # Analyse at 48×48 for speed
-    N = 48
-    small = pix.scaled(N, N,
-                        Qt.AspectRatioMode.IgnoreAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation)
-    img = small.toImage().convertToFormat(QImage.Format.Format_ARGB32)
-    w, h = img.width(), img.height()
-    ALPHA = 20
-
-    def row_ok(y):
-        return any(((img.pixel(x, y) >> 24) & 0xFF) > ALPHA for x in range(w))
-    def col_ok(x):
-        return any(((img.pixel(x, y) >> 24) & 0xFF) > ALPHA for y in range(h))
-
-    min_y = next((y for y in range(h)      if row_ok(y)), 0)
-    max_y = next((y for y in range(h-1,-1,-1) if row_ok(y)), h-1)
-    min_x = next((x for x in range(w)      if col_ok(x)), 0)
-    max_x = next((x for x in range(w-1,-1,-1) if col_ok(x)), w-1)
-
-    # No meaningful padding found → return as-is
-    if min_x <= 1 and min_y <= 1 and max_x >= w-2 and max_y >= h-2:
-        return QIcon(path)
-
-    # Crop full-res with 5% padding
-    sx, sy = pix.width() / w, pix.height() / h
-    px = max(1, int((max_x - min_x) * 0.05))
-    py = max(1, int((max_y - min_y) * 0.05))
-    x1 = max(0, int((min_x - px) * sx))
-    y1 = max(0, int((min_y - py) * sy))
-    x2 = min(pix.width(),  int((max_x + px + 1) * sx))
-    y2 = min(pix.height(), int((max_y + py + 1) * sy))
-    return QIcon(pix.copy(x1, y1, x2 - x1, y2 - y1))
+    return QIcon(path)
 
 
 SIDEBAR_W           = 200
@@ -136,12 +100,67 @@ class AudiobookManagerApp:
         self.window.setWindowTitle("Audiobook Manager — HellTrucker")
         self.window.resize(1300, 800)
         self.window.setMinimumSize(900, 580)
+        self.window.setCentralWidget(self._build_splash_widget())
+        self.window.show()
+        self._set_dark_titlebar()
+        QApplication.processEvents()
 
         self._build_ui()
-        self.window.show()
         self._set_dark_titlebar()
         self._auto_load_library()
         self._qt_app.aboutToQuit.connect(self._on_app_quit)
+
+    # ── Splash screen ──────────────────────────────────────────────────────
+
+    def _build_splash_widget(self) -> QWidget:
+        widget = QWidget()
+        widget.setStyleSheet("background: #1a1a1a;")
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(0)
+
+        # Icône
+        _ico = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "audiobook-manager.ico")
+        icon_pix = QIcon(_ico).pixmap(QSize(96, 96))
+        if not icon_pix.isNull():
+            lbl_icon = QLabel()
+            lbl_icon.setPixmap(icon_pix)
+            lbl_icon.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            lbl_icon.setStyleSheet("background: transparent; padding-bottom: 16px;")
+            layout.addWidget(lbl_icon)
+
+        # Titre
+        lbl_title = QLabel("Audiobook Manager")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        lbl_title.setStyleSheet(
+            "color: #ffffff; font-size: 22pt; font-weight: bold;"
+            " font-family: 'Segoe UI'; background: transparent;")
+        layout.addWidget(lbl_title)
+
+        # Sous-titre
+        lbl_sub = QLabel("HellTrucker")
+        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        lbl_sub.setStyleSheet(
+            "color: #666666; font-size: 10pt; font-family: 'Segoe UI';"
+            " background: transparent; padding-bottom: 24px;")
+        layout.addWidget(lbl_sub)
+
+        # Ligne de séparation
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFixedWidth(200)
+        sep.setStyleSheet("color: #2e2e2e; background: #2e2e2e;")
+        layout.addWidget(sep, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        # Texte chargement
+        lbl_load = QLabel("Chargement…")
+        lbl_load.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        lbl_load.setStyleSheet(
+            "color: #444444; font-size: 9pt; font-family: 'Segoe UI';"
+            " background: transparent; padding-top: 12px;")
+        layout.addWidget(lbl_load)
+
+        return widget
 
     # ── Thème ──────────────────────────────────────────────────────────────
 
@@ -224,13 +243,13 @@ class AudiobookManagerApp:
 
         _icons = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons")
         self._nav_icon_paths = {
-            "library":     os.path.join(_icons, "Bibliothèque.png"),
-            "editor":      os.path.join(_icons, "editeur.png"),
-            "queue":       os.path.join(_icons, "Conversion.png"),
-            "scene_copy":  os.path.join(_icons, "copie scene.png"),
-            "prez":        os.path.join(_icons, "presentation.png"),
-            "referential": os.path.join(_icons, "referentiel.png"),
-            "console":     os.path.join(_icons, "terminal.png"),
+            "library":     os.path.join(_icons, "Bibliothèque.ico"),
+            "editor":      os.path.join(_icons, "editeur.ico"),
+            "queue":       os.path.join(_icons, "Conversion.ico"),
+            "scene_copy":  os.path.join(_icons, "copie scene.ico"),
+            "prez":        os.path.join(_icons, "presentation.ico"),
+            "referential": os.path.join(_icons, "referentiel.ico"),
+            "console":     os.path.join(_icons, "terminal.ico"),
         }
 
         sb = QFrame()
@@ -256,7 +275,7 @@ class AudiobookManagerApp:
         hl.setSpacing(3)
         hl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        self._app_icon_pixmap = QPixmap(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "audiobook-manager.png"))
+        self._app_icon = QIcon(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "audiobook-manager.ico"))
 
         self._lbl_icon = _ClickableLabel()
         self._lbl_icon.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -308,7 +327,7 @@ class AudiobookManagerApp:
 
         self._settings_btn = QPushButton("   Paramètres")
         self._settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._settings_btn.setIcon(_auto_icon(os.path.join(_icons, "parametre.png")))
+        self._settings_btn.setIcon(_auto_icon(os.path.join(_icons, "parametre.ico")))
         self._settings_btn.setIconSize(QSize(32, 32))
         self._settings_btn.setStyleSheet(NAV_BASE.format(bg="transparent", fg="#888",
                                                          hover="rgba(255,255,255,0.06)"))
@@ -343,18 +362,14 @@ class AudiobookManagerApp:
         self._sidebar_nav_items.append((page_id, icon, label, btn))
 
     def _set_icon_pixmap(self, size: int):
-        if self._app_icon_pixmap.isNull():
+        if self._app_icon.isNull():
             self._lbl_icon.setText("🎧")
             self._lbl_icon.setStyleSheet(
                 f"color:#0067c0; font-size:{'26' if size >= 40 else '20'}pt;"
                 " background:transparent; padding:4px;")
         else:
             ratio = self._lbl_icon.devicePixelRatioF()
-            pix = self._app_icon_pixmap.scaled(
-                int(size * ratio), int(size * ratio),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            pix = self._app_icon.pixmap(QSize(int(size * ratio), int(size * ratio)))
             pix.setDevicePixelRatio(ratio)
             self._lbl_icon.setPixmap(pix)
 

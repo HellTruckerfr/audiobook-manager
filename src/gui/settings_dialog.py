@@ -7,10 +7,19 @@ from PyQt6.QtWidgets import (
     QHeaderView, QAbstractItemView, QCheckBox, QFileDialog,
     QDialogButtonBox, QMessageBox, QFrame, QComboBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QIcon, QPixmap
 
 from ..config_manager import ConfigManager, FolderConfig
 from ..windows_utils import set_music_folder_type
+
+
+_ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "icons")
+_SMALL_BTN = "padding: 2px;"   # override pour les boutons icône 30px
+
+
+def _icon_btn(filename: str) -> QIcon:
+    return QIcon(os.path.join(_ICONS_DIR, filename))
 
 
 class SettingsDialog(QDialog):
@@ -65,12 +74,14 @@ class SettingsDialog(QDialog):
         vl.addWidget(self._src_table, 1)
 
         btn_row = QHBoxLayout()
-        for text, fn in [
-            ("+ Ajouter",  self._add_source),
-            ("✎ Modifier", self._edit_source),
-            ("✕ Supprimer",self._del_source),
+        for icon_f, text, fn in [
+            (None,              "+ Ajouter",   self._add_source),
+            ("Modifier.ico",    "  Modifier",  self._edit_source),
+            ("Annuler.ico",     "  Supprimer", self._del_source),
         ]:
             b = QPushButton(text)
+            if icon_f:
+                b.setIcon(_icon_btn(icon_f)); b.setIconSize(QSize(16, 16))
             b.clicked.connect(fn)
             btn_row.addWidget(b)
         btn_row.addStretch()
@@ -102,13 +113,19 @@ class SettingsDialog(QDialog):
             row = QHBoxLayout()
             row.addWidget(QLabel(label), 1)
             row.addWidget(le, 4)
-            btn = QPushButton("…")
-            btn.setMaximumWidth(30)
+            btn = QPushButton()
+            btn.setIcon(_icon_btn("folder.ico"))
+            btn.setIconSize(QSize(20, 20))
+            btn.setFixedWidth(30)
+            btn.setStyleSheet(_SMALL_BTN)
             _le = le
             btn.clicked.connect(lambda _, l=_le: self._browse_dir(l))
             row.addWidget(btn)
-            music_btn = QPushButton("♪")
-            music_btn.setMaximumWidth(30)
+            music_btn = QPushButton()
+            music_btn.setIcon(_icon_btn("notes.ico"))
+            music_btn.setIconSize(QSize(20, 20))
+            music_btn.setFixedWidth(30)
+            music_btn.setStyleSheet(_SMALL_BTN)
             music_btn.setToolTip(
                 "Configurer comme dossier Musique (Windows Explorer)\n"
                 "Crée desktop.ini récursivement — active les colonnes\n"
@@ -196,8 +213,11 @@ class SettingsDialog(QDialog):
             row = QHBoxLayout()
             row.addWidget(QLabel(label), 1)
             row.addWidget(le, 4)
-            btn = QPushButton("…")
-            btn.setMaximumWidth(30)
+            btn = QPushButton()
+            btn.setIcon(_icon_btn("folder.ico"))
+            btn.setIconSize(QSize(20, 20))
+            btn.setFixedWidth(30)
+            btn.setStyleSheet(_SMALL_BTN)
             _le = le
             btn.clicked.connect(lambda _, l=_le: self._browse_file(l))
             row.addWidget(btn)
@@ -316,7 +336,8 @@ class SettingsDialog(QDialog):
         vl.addWidget(sec2)
 
         export_row = QHBoxLayout()
-        export_btn = QPushButton("📦 Exporter un backup…")
+        export_btn = QPushButton("  Exporter un backup…")
+        export_btn.setIcon(_icon_btn("exportation.ico")); export_btn.setIconSize(QSize(18, 18))
         export_btn.setMaximumWidth(200)
         export_btn.clicked.connect(self._export_backup)
         self._export_status = QLabel("")
@@ -337,15 +358,17 @@ class SettingsDialog(QDialog):
         vl.addWidget(sec3)
 
         warn = QLabel(
-            "⚠ La restauration remplace immédiatement config.json et library.json. "
-            "Relancez l'application pour que les changements soient pris en compte."
+            "⚠ La restauration remplace immédiatement config.json et library.json "
+            "et recharge les paramètres dans ce dialogue. "
+            "Un relancement reste recommandé pour que la bibliothèque se recharge."
         )
         warn.setWordWrap(True)
         warn.setStyleSheet("color: #e8a020; font-size: 8.5pt;")
         vl.addWidget(warn)
 
         restore_row = QHBoxLayout()
-        restore_btn = QPushButton("📂 Restaurer depuis un backup…")
+        restore_btn = QPushButton("  Restaurer depuis un backup…")
+        restore_btn.setIcon(_icon_btn("folder.ico")); restore_btn.setIconSize(QSize(18, 18))
         restore_btn.setMaximumWidth(230)
         restore_btn.clicked.connect(self._restore_backup)
         self._restore_status = QLabel("")
@@ -369,6 +392,7 @@ class SettingsDialog(QDialog):
         if not dest:
             return
         try:
+            self._flush()
             self.cfg.backup(dest)
             self._export_status.setStyleSheet("color: #57cc7a; font-size: 8.5pt;")
             self._export_status.setText(f"✓ Exporté")
@@ -393,8 +417,9 @@ class SettingsDialog(QDialog):
             return
         try:
             self.cfg.restore(path)
+            self._load()
             self._restore_status.setStyleSheet("color: #57cc7a; font-size: 8.5pt;")
-            self._restore_status.setText("✓ Restauré — relancez l'application")
+            self._restore_status.setText("✓ Restauré")
         except Exception as e:
             self._restore_status.setStyleSheet("color: #e05555; font-size: 8.5pt;")
             self._restore_status.setText(f"✗ {e}")
@@ -425,7 +450,8 @@ class SettingsDialog(QDialog):
         for p in self.cfg.app_config.scan_ignore_paths:
             self._append_ignore(p)
 
-    def _save(self):
+    def _flush(self):
+        """Persiste les paramètres courants du dialogue sur disque sans le fermer."""
         folders = []
         for row in range(self._src_table.rowCount()):
             label    = self._src_table.item(row, 0).text()
@@ -450,6 +476,9 @@ class SettingsDialog(QDialog):
             if self._ignore_table.item(r, 0)
         ]
         self.cfg.save_config()
+
+    def _save(self):
+        self._flush()
         self.accept()
 
     # ── Gestion des sources ───────────────────────────────────────────
@@ -540,8 +569,11 @@ class _FolderDialog(QDialog):
         _row("Étiquette :", self._label_le)
 
         self._path_le = QLineEdit(folder.path if folder else "")
-        browse = QPushButton("…")
-        browse.setMaximumWidth(30)
+        browse = QPushButton()
+        browse.setIcon(_icon_btn("folder.ico"))
+        browse.setIconSize(QSize(20, 20))
+        browse.setFixedWidth(30)
+        browse.setStyleSheet(_SMALL_BTN)
         browse.clicked.connect(self._browse)
         _row("Chemin :", self._path_le, browse)
 

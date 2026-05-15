@@ -6,13 +6,14 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTableWidget, QTableWidgetItem,
-    QHeaderView, QLineEdit, QComboBox, QLabel, QAbstractItemView, QMenu,
+    QHeaderView, QLineEdit, QLabel, QAbstractItemView, QMenu,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QMessageBox,
     QCheckBox, QPushButton, QScrollArea, QStackedWidget, QSlider,
     QStyle, QStyleOptionButton,
 )
-from PyQt6.QtCore import Qt, QPoint, QRect, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
+from PyQt6.QtCore import Qt, QPoint, QRect, QSize, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap, QAction
+from .icon_utils import get_icon
 from PyQt6.QtWidgets import QFrame, QProgressBar
 
 from ..models import BookEntry, AudioInfo
@@ -46,16 +47,41 @@ def _quality_cell(src: Optional[AudioInfo]) -> str:
     return f"{src.codec.upper()} {src.bitrate_kbps}k"
 
 
+_STATUS_SORT = {
+    "En-attente.ico":    0,
+    "En-cours.ico":      1,
+    "Erreur.ico":        2,
+    "Avertissement.ico": 3,
+    "OK.ico":            4,
+}
+
+
 def _combined_status(book: BookEntry):
     if book.status == "converting":
-        return "⟳", STATUS_COLOR["converting"]
+        return "En-cours.ico",   STATUS_COLOR["converting"]
     if book.status == "error":
-        return "✗", STATUS_COLOR["error"]
+        return "Erreur.ico",     STATUS_COLOR["error"]
     if book.output_m4b_path and os.path.exists(book.output_m4b_path):
         if book.source_is_output:
-            return "⚠", "#c8a000"  # converti mais source originale disparue
-        return "✓", STATUS_COLOR["done"]
-    return "○", STATUS_COLOR["pending"]
+            return "Avertissement.ico", "#c8a000"
+        return "OK.ico",         STATUS_COLOR["done"]
+    return "En-attente.ico",     STATUS_COLOR["pending"]
+
+
+class _StatusItem(QTableWidgetItem):
+    """Item État trié par priorité numérique (pas par texte vide)."""
+    def __init__(self, icon_fn: str, color: str):
+        super().__init__("")
+        self.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        self.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        self.setForeground(QColor(color))
+        self.setIcon(get_icon(icon_fn))
+        self._sort_key = _STATUS_SORT.get(icon_fn, 99)
+
+    def __lt__(self, other):
+        if isinstance(other, _StatusItem):
+            return self._sort_key < other._sort_key
+        return super().__lt__(other)
 
 
 def _make_item(text: str, center: bool = False,
@@ -639,14 +665,14 @@ class LibraryPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ── Toolbar (scanner + recherche sur une seule ligne) ──────────
+        # ── Toolbar ligne 1 : boutons d'action ────────────────────────
         bar = QWidget()
         bl = QHBoxLayout(bar)
-        bl.setContentsMargins(8, 6, 8, 6)
+        bl.setContentsMargins(8, 6, 8, 4)
         bl.setSpacing(8)
 
-        # Boutons scanner
-        self._scan_btn = QPushButton("⟳  Scanner")
+        self._scan_btn = QPushButton("  Scanner")
+        self._scan_btn.setIcon(get_icon("En-cours.ico")); self._scan_btn.setIconSize(QSize(18, 18))
         self._scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._scan_btn.setToolTip(
             "Scan incrémental : ne traite que les nouveaux dossiers / fichiers.\n"
@@ -664,54 +690,22 @@ class LibraryPanel(QWidget):
         self._scan_btn.clicked.connect(self.scan_requested)
         bl.addWidget(self._scan_btn)
 
-        update_btn = QPushButton("↻  Update")
+        update_btn = QPushButton("  Update")
+        update_btn.setIcon(get_icon("Update.ico")); update_btn.setIconSize(QSize(18, 18))
         update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         update_btn.setToolTip("Recharge depuis l'état sauvegardé (sans scan)")
         update_btn.clicked.connect(self.update_requested)
         bl.addWidget(update_btn)
 
-        reset_btn = QPushButton("↺  Reset cache")
+        reset_btn = QPushButton("  Reset cache")
+        reset_btn.setIcon(get_icon("Réinitialiser.ico")); reset_btn.setIconSize(QSize(18, 18))
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         reset_btn.setToolTip("Vide le cache ffprobe — le prochain scan re-fingerprint tout")
         reset_btn.clicked.connect(self.reset_requested)
         bl.addWidget(reset_btn)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #3a3a3a;")
-        bl.addWidget(sep)
-
-        # Recherche
-        bl.addWidget(QLabel("🔍"))
-        self._search = QLineEdit()
-        self._search.setPlaceholderText("Rechercher…")
-        self._search.setMaximumWidth(220)
-        self._search.textChanged.connect(self._refresh)
-        bl.addWidget(self._search)
-
-        bl.addWidget(QLabel("Trier :"))
-        self._sort_cb = QComboBox()
-        self._sort_cb.addItems(["Titre", "Auteur"])
-        self._sort_cb.setMaximumWidth(120)
-        self._sort_cb.currentTextChanged.connect(self._refresh)
-        bl.addWidget(self._sort_cb)
-
-        self._hide_complete_cb = QCheckBox("Cacher complets")
-        self._hide_complete_cb.setToolTip(
-            "Masque les livres dont les méta requises sont renseignées\n"
-            "(ou marqués « ignorer la vérif »).")
-        saved_hide = bool(self.app.config_manager.app_config.ui_prefs.get(
-            HIDE_COMPLETE_KEY, False))
-        self._hide_complete_cb.setChecked(saved_hide)
-        self._hide_complete_cb.toggled.connect(self._on_hide_complete_toggled)
-        bl.addWidget(self._hide_complete_cb)
-
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.Shape.VLine)
-        sep3.setStyleSheet("color: #3a3a3a;")
-        bl.addWidget(sep3)
-
-        self._cat_btn = QPushButton("⊞  Catalogue")
+        self._cat_btn = QPushButton("  Catalogue")
+        self._cat_btn.setIcon(get_icon("Vue-catalogue.ico")); self._cat_btn.setIconSize(QSize(24, 24))
         self._cat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._cat_btn.setToolTip("Basculer vers la vue catalogue (auteurs / séries / volumes)")
         self._cat_btn.setCheckable(True)
@@ -752,6 +746,38 @@ class LibraryPanel(QWidget):
         bl.addWidget(self._count_lbl)
 
         layout.addWidget(bar)
+
+        # ── Toolbar ligne 2 : filtres + recherche pleine largeur ──────────
+        bar2 = QWidget()
+        bl2 = QHBoxLayout(bar2)
+        bl2.setContentsMargins(8, 2, 8, 6)
+        bl2.setSpacing(8)
+
+        self._hide_complete_cb = QCheckBox("Cacher complets")
+        self._hide_complete_cb.setToolTip(
+            "Masque les livres dont les méta requises sont renseignées\n"
+            "(ou marqués « ignorer la vérif »).")
+        saved_hide = bool(self.app.config_manager.app_config.ui_prefs.get(
+            HIDE_COMPLETE_KEY, False))
+        self._hide_complete_cb.setChecked(saved_hide)
+        self._hide_complete_cb.toggled.connect(self._on_hide_complete_toggled)
+        bl2.addWidget(self._hide_complete_cb)
+
+        _sep_search = QFrame()
+        _sep_search.setFrameShape(QFrame.Shape.VLine)
+        _sep_search.setStyleSheet("color: #3a3a3a;")
+        bl2.addWidget(_sep_search)
+
+        _lbl_search = QLabel()
+        _lbl_search.setPixmap(get_icon("recherche.ico").pixmap(QSize(16, 16)))
+        bl2.addWidget(_lbl_search)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Rechercher…")
+        self._search.textChanged.connect(self._refresh)
+        bl2.addWidget(self._search, 1)
+
+        layout.addWidget(bar2)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
@@ -848,9 +874,9 @@ class LibraryPanel(QWidget):
         for row in range(self._table.rowCount()):
             cell = self._table.item(row, COL_TITLE)
             if cell and cell.data(Qt.ItemDataRole.UserRole) == book_id:
-                icon, color = _combined_status(book) if book else ("○", "#555")
+                icon_fn, color = _combined_status(book) if book else ("En-attente.ico", "#555")
                 self._populating = True
-                status_item = _make_item(icon, True, color)
+                status_item = _StatusItem(icon_fn, color)
                 if book and book.source_is_output:
                     status_item.setToolTip("Source originale introuvable — seul le fichier de sortie M4B subsiste.\n"
                                            "La re-conversion M4B est bloquée ; utilisez 'Méta' pour mettre à jour les tags.")
@@ -952,10 +978,7 @@ class LibraryPanel(QWidget):
             return True
 
         books = [b for b in self._books if _keep(b)]
-        if self._sort_cb.currentText() == "Auteur":
-            books.sort(key=lambda b: b.display_author.lower())
-        else:
-            books.sort(key=lambda b: b.display_title.lower())
+        books.sort(key=lambda b: b.display_title.lower())
         self._filtered_books = books
 
         self._table.setSortingEnabled(False)
@@ -973,7 +996,7 @@ class LibraryPanel(QWidget):
                         prev_checked.add(bid)
 
             for row, book in enumerate(books):
-                icon, color = _combined_status(book)
+                icon_fn, color = _combined_status(book)
 
                 cb_item = QTableWidgetItem("")
                 cb_item.setFlags(
@@ -1000,7 +1023,7 @@ class LibraryPanel(QWidget):
                 self._table.setItem(row, COL_SOURCE,
                     _make_item(quality, True, src_color))
 
-                status_item = _make_item(icon, True, color)
+                status_item = _StatusItem(icon_fn, color)
                 if book.source_is_output:
                     status_item.setToolTip("Source originale introuvable — seul le fichier de sortie M4B subsiste.\n"
                                            "La re-conversion M4B est bloquée ; utilisez 'Méta' pour mettre à jour les tags.")
@@ -1196,58 +1219,75 @@ class LibraryPanel(QWidget):
         menu = QMenu(self)
         from_checks = bool(checked)
 
+        def _a(text, icon_fn=None):
+            act = QAction(text, menu)
+            if icon_fn:
+                act.setIcon(get_icon(icon_fn))
+            return act
+
         if len(books) > 1:
             n = len(books)
             if from_checks:
                 menu.addAction(f"({n} livres cochés)").setEnabled(False)
                 menu.addSeparator()
-            menu.addAction(f"▶  Ajouter {n} livres à la file").triggered.connect(
-                lambda: [self.app.add_to_queue(b) for b in books])
-            menu.addAction(f"⚡  Convertir {n} livres maintenant").triggered.connect(
-                lambda: [self.app.convert_now(b) for b in books])
-            menu.addAction(f"🎵  Exporter {n} livres en MP3").triggered.connect(
-                lambda: [self.app.add_mp3_export(b) for b in books])
+            _add = _a(f"  Ajouter {n} livres à la file", "Lancer.ico")
+            _add.triggered.connect(lambda: [self.app.add_to_queue(b) for b in books])
+            menu.addAction(_add)
+            _conv = _a(f"  Convertir {n} livres maintenant", "Conversion.ico")
+            _conv.triggered.connect(lambda: [self.app.convert_now(b) for b in books])
+            menu.addAction(_conv)
+            _mp3 = _a(f"  Exporter {n} livres en MP3", "Mp3.ico")
+            _mp3.triggered.connect(lambda: [self.app.add_mp3_export(b) for b in books])
+            menu.addAction(_mp3)
             meta_with_m4b = [b for b in books if b.output_m4b_path]
             if meta_with_m4b:
-                menu.addAction(f"🏷  Mettre à jour les tags M4B ({len(meta_with_m4b)} livres)").triggered.connect(
-                    lambda checked=False, bl=meta_with_m4b: [self.app.update_book_metadata(b) for b in bl])
+                _tags = _a(f"  Mettre à jour les tags M4B ({len(meta_with_m4b)} livres)", "Tags.ico")
+                _tags.triggered.connect(lambda checked=False, bl=meta_with_m4b: [self.app.update_book_metadata(b) for b in bl])
+                menu.addAction(_tags)
             menu.addSeparator()
-            menu.addAction(f"Marquer {n} livres comme fait ✓").triggered.connect(
-                lambda: [self.update_status(b.id, "done") for b in books])
+            _done = _a(f"  Marquer {n} livres comme fait", "OK.ico")
+            _done.triggered.connect(lambda: [self.update_status(b.id, "done") for b in books])
+            menu.addAction(_done)
             all_ignored = all(b.config.ignore_metadata_check for b in books)
-            label_meta = (f"☐  Annuler « ignorer méta » sur {n} livres"
+            label_meta = (f"  Annuler « ignorer méta » sur {n} livres"
                           if all_ignored
-                          else f"☑  Marquer méta OK sur {n} livres")
+                          else f"  Marquer méta OK sur {n} livres")
             menu.addAction(label_meta).triggered.connect(
                 lambda checked=False, target=not all_ignored:
                 self._toggle_ignore_meta(books, target))
             menu.addSeparator()
-            menu.addAction(f"🗑  Supprimer {n} livres de la bibliothèque…"
-                           ).triggered.connect(
-                lambda: self._delete_books(books))
+            _del = _a(f"  Supprimer {n} livres de la bibliothèque…", "Vider.ico")
+            _del.triggered.connect(lambda: self._delete_books(books))
+            menu.addAction(_del)
             if from_checks:
                 menu.addSeparator()
-                menu.addAction("☐  Tout décocher").triggered.connect(self._uncheck_all)
+                menu.addAction("  Tout décocher").triggered.connect(self._uncheck_all)
         else:
             book = books[0]
-            menu.addAction("✏  Modifier titre / auteur…").triggered.connect(
-                lambda: self._quick_edit(book))
+            _edit1 = _a("  Modifier titre / auteur…", "Modifier.ico")
+            _edit1.triggered.connect(lambda: self._quick_edit(book))
+            menu.addAction(_edit1)
             menu.addSeparator()
-            menu.addAction("✏  Ouvrir dans l'éditeur complet").triggered.connect(
-                lambda: self.app.on_book_selected(book))
-            menu.addAction("▶  Ajouter à la file").triggered.connect(
-                lambda: self.app.add_to_queue(book))
-            menu.addAction("⚡  Convertir maintenant").triggered.connect(
-                lambda: self.app.convert_now(book))
-            menu.addAction("🎵  Exporter en MP3").triggered.connect(
-                lambda: self.app.add_mp3_export(book))
+            _edit2 = _a("  Ouvrir dans l'éditeur complet", "Modifier.ico")
+            _edit2.triggered.connect(lambda: self.app.on_book_selected(book))
+            menu.addAction(_edit2)
+            _add2 = _a("  Ajouter à la file", "Lancer.ico")
+            _add2.triggered.connect(lambda: self.app.add_to_queue(book))
+            menu.addAction(_add2)
+            _conv2 = _a("  Convertir maintenant", "Conversion.ico")
+            _conv2.triggered.connect(lambda: self.app.convert_now(book))
+            menu.addAction(_conv2)
+            _mp32 = _a("  Exporter en MP3", "Mp3.ico")
+            _mp32.triggered.connect(lambda: self.app.add_mp3_export(book))
+            menu.addAction(_mp32)
             if book.output_m4b_path:
-                menu.addAction("🏷  Mettre à jour les tags M4B").triggered.connect(
-                    lambda checked=False, b=book: self.app.update_book_metadata(b))
+                _tags2 = _a("  Mettre à jour les tags M4B", "Tags.ico")
+                _tags2.triggered.connect(lambda checked=False, b=book: self.app.update_book_metadata(b))
+                menu.addAction(_tags2)
             menu.addSeparator()
-            label_meta = ("☐  Méta : revérifier (annuler « ignorer »)"
+            label_meta = ("  Méta : revérifier (annuler « ignorer »)"
                           if book.config.ignore_metadata_check
-                          else "☑  Méta OK (ignorer la vérif)")
+                          else "  Méta OK (ignorer la vérif)")
             menu.addAction(label_meta).triggered.connect(
                 lambda checked=False, b=book: self._toggle_ignore_meta(
                     [b], not b.config.ignore_metadata_check))
@@ -1256,35 +1296,42 @@ class LibraryPanel(QWidget):
             sources_with_path = [s for s in book.sources if s.path]
             if len(sources_with_path) == 1:
                 src = sources_with_path[0]
-                menu.addAction(
-                    f"📂  Ouvrir dans l'Explorateur ({src.folder_label})"
-                ).triggered.connect(lambda checked=False, p=src.path: _open_in_explorer(p))
+                _exp1 = _a(f"  Ouvrir dans l'Explorateur ({src.folder_label})", "folder.ico")
+                _exp1.triggered.connect(lambda checked=False, p=src.path: _open_in_explorer(p))
+                menu.addAction(_exp1)
             elif len(sources_with_path) > 1:
-                sub = menu.addMenu("📂  Ouvrir dans l'Explorateur")
+                sub = menu.addMenu("  Ouvrir dans l'Explorateur")
+                sub.setIcon(get_icon("folder.ico"))
                 for src in sources_with_path:
                     sub.addAction(src.folder_label).triggered.connect(
                         lambda checked=False, p=src.path: _open_in_explorer(p))
 
             if book.output_m4b_path and os.path.exists(book.output_m4b_path):
-                menu.addAction("📂  Ouvrir M4B de sortie").triggered.connect(
-                    lambda checked=False, p=book.output_m4b_path: _open_in_explorer(p))
+                _m4b = _a("  Ouvrir M4B de sortie", "folder.ico")
+                _m4b.triggered.connect(lambda checked=False, p=book.output_m4b_path: _open_in_explorer(p))
+                menu.addAction(_m4b)
 
             if book.output_mp3_dir and os.path.isdir(book.output_mp3_dir):
-                menu.addAction("📂  Ouvrir dossier MP3").triggered.connect(
-                    lambda checked=False, p=book.output_mp3_dir: _open_in_explorer(p))
+                _mp3d = _a("  Ouvrir dossier MP3", "folder.ico")
+                _mp3d.triggered.connect(lambda checked=False, p=book.output_mp3_dir: _open_in_explorer(p))
+                menu.addAction(_mp3d)
 
             menu.addSeparator()
-            menu.addAction("Marquer comme fait ✓").triggered.connect(
-                lambda: self.update_status(book.id, "done"))
+            _done2 = _a("  Marquer comme fait", "OK.ico")
+            _done2.triggered.connect(lambda: self.update_status(book.id, "done"))
+            menu.addAction(_done2)
             menu.addSeparator()
-            menu.addAction("⛓  Fusionner avec…").triggered.connect(
-                lambda: self._merge_dialog(book))
+            _fus = _a("  Fusionner avec…", "Fusionner.ico")
+            _fus.triggered.connect(lambda: self._merge_dialog(book))
+            menu.addAction(_fus)
             if book.merged_from:
-                menu.addAction("✂  Défusionner…").triggered.connect(
-                    lambda: self._unmerge_dialog(book))
+                _def = _a("  Défusionner…", "Défusionner.ico")
+                _def.triggered.connect(lambda: self._unmerge_dialog(book))
+                menu.addAction(_def)
             menu.addSeparator()
-            menu.addAction("🗑  Supprimer de la bibliothèque…").triggered.connect(
-                lambda: self._delete_book(book))
+            _del2 = _a("  Supprimer de la bibliothèque…", "Vider.ico")
+            _del2.triggered.connect(lambda: self._delete_book(book))
+            menu.addAction(_del2)
 
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
