@@ -24,6 +24,7 @@ from .prez_panel import PrezPanel
 from .settings_dialog import SettingsDialog
 from .referential_panel import ReferentialPanel
 from .theme import DARK_STYLESHEET
+from .icon_utils import get_icon
 
 def _auto_icon(path: str) -> QIcon:
     return QIcon(path)
@@ -98,6 +99,7 @@ class AudiobookManagerApp:
 
         self.window = QMainWindow()
         self.window.setWindowTitle("Audiobook Manager — HellTrucker")
+        self.window.setWindowIcon(get_icon("audiobook-manager.ico"))
         self.window.resize(1300, 800)
         self.window.setMinimumSize(900, 580)
         self.window.setCentralWidget(self._build_splash_widget())
@@ -120,8 +122,7 @@ class AudiobookManagerApp:
         layout.setSpacing(0)
 
         # Icône
-        _ico = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "audiobook-manager.ico")
-        icon_pix = QIcon(_ico).pixmap(QSize(96, 96))
+        icon_pix = get_icon("audiobook-manager.ico").pixmap(QSize(96, 96))
         if not icon_pix.isNull():
             lbl_icon = QLabel()
             lbl_icon.setPixmap(icon_pix)
@@ -275,7 +276,7 @@ class AudiobookManagerApp:
         hl.setSpacing(3)
         hl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        self._app_icon = QIcon(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icons", "audiobook-manager.ico"))
+        self._app_icon = get_icon("audiobook-manager.ico")
 
         self._lbl_icon = _ClickableLabel()
         self._lbl_icon.setAlignment(Qt.AlignmentFlag.AlignHCenter)
