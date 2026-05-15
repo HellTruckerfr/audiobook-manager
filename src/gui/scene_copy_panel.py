@@ -198,7 +198,7 @@ def _build_context(book: BookEntry, all_books: List[BookEntry],
         "format":     fmt,
         "bitrate":    bitrate,
         "codec":      codec,
-        "group":      group or "HellTrucker",
+        "group":      group or "",
         "tag_album":  tag_album,
     }
 
@@ -556,7 +556,7 @@ class SceneCopyPanel(QWidget):
         cfg.scene_copy_dest_mp3        = self._dest_mp3_le.text().strip()
         cfg.scene_copy_dir_template    = self._dir_tpl_le.text().strip()
         cfg.scene_copy_file_template   = self._file_tpl_le.text().strip()
-        cfg.scene_copy_group           = self._group_le.text().strip() or "HellTrucker"
+        cfg.scene_copy_group           = self._group_le.text().strip() or ""
         cfg.scene_copy_include_codec   = self._codec_cb.isChecked()
         cfg.scene_copy_include_bitrate = self._bitrate_cb.isChecked()
         self.app.config_manager.save_config()
@@ -778,7 +778,7 @@ class SceneCopyPanel(QWidget):
                 di.setToolTip("")
 
     def _render_for(self, book: BookEntry, fmt: str = "M4B") -> str:
-        group          = self._group_le.text().strip() or "HellTrucker"
+        group          = self._group_le.text().strip() or ""
         include_codec  = self._codec_cb.isChecked()
         include_bitrate = self._bitrate_cb.isChecked()
         file_tpl       = self._file_tpl_le.text()
@@ -877,7 +877,7 @@ class SceneCopyPanel(QWidget):
             if skipped:
                 console.log_action(f"   ({skipped} ignoré(s) — aucun export)", "info")
 
-        group           = self._group_le.text().strip() or "HellTrucker"
+        group           = self._group_le.text().strip() or ""
         include_codec   = self._codec_cb.isChecked()
         include_bitrate = self._bitrate_cb.isChecked()
         dir_tpl         = self._dir_tpl_le.text()

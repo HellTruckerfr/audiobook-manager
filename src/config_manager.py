@@ -53,7 +53,7 @@ class AppConfig:
     scene_copy_file_template: str = DEFAULT_SCENE_COPY_FILE_TEMPLATE
     scene_copy_include_codec: bool = True
     scene_copy_include_bitrate: bool = True
-    scene_copy_group: str = "HellTrucker"
+    scene_copy_group: str = ""
     scan_ignore_paths: List[str] = field(default_factory=list)
     ui_prefs: dict = field(default_factory=dict)
 
@@ -109,7 +109,7 @@ class ConfigManager:
                     "scene_copy_file_template", DEFAULT_SCENE_COPY_FILE_TEMPLATE),
                 scene_copy_include_codec=data.get("scene_copy_include_codec", True),
                 scene_copy_include_bitrate=data.get("scene_copy_include_bitrate", True),
-                scene_copy_group=data.get("scene_copy_group", "HellTrucker"),
+                scene_copy_group=data.get("scene_copy_group", ""),
                 scan_ignore_paths=data.get("scan_ignore_paths", []),
                 ui_prefs=data.get("ui", {}),
             )
