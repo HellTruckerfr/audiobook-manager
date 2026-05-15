@@ -43,7 +43,7 @@ class AppConfig:
     output_mp3: str = ""
     logo_path: str = ""
     font_path: str = "C:/Windows/Fonts/arialbd.ttf"
-    watermark_text: str = "by HellTrucker"
+    watermark_text: str = ""
     naming_style: str = "perso"   # "perso" | "scene"
     metadata_required_fields: List[str] = field(
         default_factory=lambda: list(DEFAULT_METADATA_REQUIRED))
@@ -96,7 +96,7 @@ class ConfigManager:
                 output_mp3=data.get("output_mp3", ""),
                 logo_path=data.get("logo_path", ""),
                 font_path=data.get("font_path", "C:/Windows/Fonts/arialbd.ttf"),
-                watermark_text=data.get("watermark_text", "by HellTrucker"),
+                watermark_text=data.get("watermark_text", ""),
                 naming_style=data.get("naming_style", "perso"),
                 metadata_required_fields=data.get(
                     "metadata_required_fields", list(DEFAULT_METADATA_REQUIRED)),
