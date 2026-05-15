@@ -23,7 +23,7 @@ Elle scanne les dossiers sources, détecte les métadonnées, et permet de conve
 - **Export MP3** — découpage par chapitre, encodage LAME 128k, cover embarquée, tags ID3 complets
 - **Watermark** — logo + texte incrustés sur la couverture via FFmpeg
 - **File de conversion** — traitement séquentiel avec barre de progression, sélection via checkbox d'en-tête, tri par colonnes
-- **Convention scène** — nommage `Auteur.Titre.FRENCH.M4B.AAC.128kbps-HellTrucker`
+- **Convention scène** — nommage `Auteur.Titre.FRENCH.M4B.AAC.128kbps-{Groupe}` (groupe configurable dans les Paramètres)
 - **Copie scène** — panneau dédié pour préparer le release final ; nommage intelligent (suppression `{title}` quand tous les tomes portent le nom de la série), génération automatique de fichiers NFO M4B et MP3
 - **Présentation** — aperçu BBCode avec preview de la fiche de release (format M4B unifié)
 - **Référentiel** — base d'auteurs, séries, narrateurs et éditeurs avec renommage en masse
@@ -128,7 +128,7 @@ It scans source folders, detects metadata, and converts to **M4B** (with chapter
 - **MP3 export** — chapter splitting, LAME 128k encoding, embedded cover art, full ID3 tags
 - **Watermark** — logo + text overlay on cover art via FFmpeg
 - **Conversion queue** — sequential processing with progress bar, header checkbox selection, column sorting
-- **Scene naming** — `Author.Title.FRENCH.M4B.AAC.128kbps-HellTrucker` convention
+- **Scene naming** — `Author.Title.FRENCH.M4B.AAC.128kbps-{Group}` convention (group configurable in Settings)
 - **Scene copy** — dedicated panel for final release prep; smart naming (drops `{title}` when all volumes share the series name), automatic NFO file generation for M4B and MP3
 - **Presentation** — BBCode preview for release sheets (unified M4B format line)
 - **Referential** — author, series, narrator and publisher database with bulk rename
