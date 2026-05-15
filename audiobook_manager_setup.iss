@@ -12,7 +12,7 @@
 #define AppVersion   "1.0.0"
 #define AppPublisher "HellTrucker"
 #define AppExeName   "AudiobookManager.exe"
-#define SourceDir    "dist\AudiobookManager"
+#define SourceDir    "C:\AudiobookManager-dist\AudiobookManager"
 
 [Setup]
 AppId={{F3A2C8B1-4D7E-4F9A-B2C3-1A2B3C4D5E6F}
@@ -22,7 +22,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL=https://github.com/HellTruckerfr/audiobook-manager
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
-OutputDir=dist
+OutputDir=C:\AudiobookManager-dist
 OutputBaseFilename=AudiobookManager-Setup
 SetupIconFile=assets\icons\audiobook-manager.ico
 Compression=lzma2/ultra64

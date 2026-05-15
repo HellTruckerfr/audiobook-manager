@@ -10,6 +10,9 @@
 
 FFMPEG_BIN = 'C:/ffmpeg/bin'
 
+import glob
+_icon_icos = [(f.replace('\\', '/'), 'assets/icons') for f in glob.glob('assets/icons/*.ico')]
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -17,9 +20,7 @@ a = Analysis(
         (f'{FFMPEG_BIN}/ffmpeg.exe',  'bin'),
         (f'{FFMPEG_BIN}/ffprobe.exe', 'bin'),
     ],
-    datas=[
-        ('assets/icons', 'assets/icons'),
-    ],
+    datas=_icon_icos,
     hiddenimports=['PyQt6.sip'],
     hookspath=[],
     hooksconfig={},
