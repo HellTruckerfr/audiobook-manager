@@ -203,8 +203,10 @@ class SettingsDialog(QDialog):
         vl.setContentsMargins(8, 8, 8, 8)
         vl.setSpacing(10)
 
-        self._logo_path = QLineEdit()
-        self._font_path = QLineEdit()
+        self._logo_path      = QLineEdit()
+        self._watermark_text = QLineEdit()
+        self._watermark_text.setPlaceholderText("ex : by HellTrucker")
+        self._font_path      = QLineEdit()
 
         for label, le, is_dir in [
             ("Logo watermark :", self._logo_path, False),
@@ -222,6 +224,16 @@ class SettingsDialog(QDialog):
             btn.clicked.connect(lambda _, l=_le: self._browse_file(l))
             row.addWidget(btn)
             vl.addLayout(row)
+
+        wm_row = QHBoxLayout()
+        wm_row.addWidget(QLabel("Texte watermark :"), 1)
+        wm_row.addWidget(self._watermark_text, 4)
+        wm_spacer = QPushButton()
+        wm_spacer.setFixedWidth(30)
+        wm_spacer.setEnabled(False)
+        wm_spacer.setStyleSheet("background: transparent; border: none;")
+        wm_row.addWidget(wm_spacer)
+        vl.addLayout(wm_row)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -433,6 +445,7 @@ class SettingsDialog(QDialog):
         self._out_m4b.setText(self.cfg.app_config.output_m4b)
         self._out_mp3.setText(self.cfg.app_config.output_mp3)
         self._logo_path.setText(self.cfg.app_config.logo_path)
+        self._watermark_text.setText(self.cfg.app_config.watermark_text)
         self._font_path.setText(self.cfg.app_config.font_path)
         # Nommage
         style = self.cfg.app_config.naming_style
@@ -465,6 +478,7 @@ class SettingsDialog(QDialog):
         self.cfg.app_config.output_m4b     = self._out_m4b.text()
         self.cfg.app_config.output_mp3     = self._out_mp3.text()
         self.cfg.app_config.logo_path      = self._logo_path.text()
+        self.cfg.app_config.watermark_text = self._watermark_text.text()
         self.cfg.app_config.font_path      = self._font_path.text()
         self.cfg.app_config.naming_style   = self._naming_cb.currentData()
         self.cfg.app_config.metadata_required_fields = [

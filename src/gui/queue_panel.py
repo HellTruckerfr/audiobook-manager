@@ -359,7 +359,7 @@ class QueuePanel(QWidget):
             subdir   = build_output_subdir(job.book, style)
             out_path = os.path.join(
                 cfg.output_m4b or os.path.join(os.path.expanduser("~"), "audiobooks", "m4b"),
-                author, subdir, build_output_filename(job.book, style))
+                author, subdir, build_output_filename(job.book, style, cfg.scene_copy_group))
             job.output_path = out_path
             self.app.converter.convert(
                 job.book, out_path,

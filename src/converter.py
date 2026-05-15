@@ -140,16 +140,16 @@ def _write_concat(path: str, files: List[str]):
             f.write(f"file '{fwd}'\n")
 
 
-def _make_watermark_filter(logo_path: str, font_path: str) -> str:
+def _make_watermark_filter(logo_path: str, font_path: str, text: str = "") -> str:
     font_path_fwd = font_path.replace("\\", "/").replace(":", "\\:")
+    safe_text = text.replace("'", "\\'") if text else ""
     return (
-        # Logo : redimensionné, canal alpha du PNG préservé tel quel
         "[1:v]scale=160:-1,format=rgba[logo];"
         "[0:v]format=rgba[bg];"
         "[bg][logo]overlay=x=W-w-10:y=H-h-30[wm];"
         "[wm]drawtext="
         f"fontfile='{font_path_fwd}':"
-        "text='by HellTrucker':"
+        f"text='{safe_text}':"
         "fontsize=12:fontcolor=white@0.75:"
         "borderw=1:bordercolor=black@0.75:"
         "x=W-tw-10:y=H-18[out]"
@@ -168,8 +168,9 @@ def _extract_cover(source_path: str, out_path: str) -> bool:
         return False
 
 
-def _apply_watermark(cover_path: str, logo_path: str, font_path: str, out_path: str) -> bool:
-    filt = _make_watermark_filter(logo_path, font_path)
+def _apply_watermark(cover_path: str, logo_path: str, font_path: str, out_path: str,
+                     text: str = "") -> bool:
+    filt = _make_watermark_filter(logo_path, font_path, text)
     try:
         r = subprocess.run(
             ["ffmpeg", "-loglevel", "error",
@@ -430,7 +431,8 @@ class Converter:
         if _raw:
             if cfg.watermark and self.cfg.app_config.logo_path:
                 if _apply_watermark(_raw, self.cfg.app_config.logo_path,
-                                    self.cfg.app_config.font_path, _cover_wm):
+                                    self.cfg.app_config.font_path, _cover_wm,
+                                    self.cfg.app_config.watermark_text):
                     cover_path = _cover_wm
                 else:
                     cover_path = _raw
@@ -598,6 +600,7 @@ class Converter:
                     self.cfg.app_config.logo_path,
                     self.cfg.app_config.font_path,
                     wm_cover,
+                    self.cfg.app_config.watermark_text,
                 ):
                     cover_path = wm_cover
 
@@ -1113,7 +1116,7 @@ def build_output_subdir(book: BookEntry, style: str = "perso") -> str:
     return _clean_filename(series) if series else ""
 
 
-def build_output_filename(book: BookEntry, style: str = "perso") -> str:
+def build_output_filename(book: BookEntry, style: str = "perso", group: str = "") -> str:
     """Retourne le nom de fichier M4B seul (sans chemin ni sous-dossier)."""
     cfg   = book.config
     title = _clean_filename(cfg.title or book.detected_title)
@@ -1124,7 +1127,7 @@ def build_output_filename(book: BookEntry, style: str = "perso") -> str:
         author  = _clean_filename(author_raw.split(",")[0].strip())
         lang    = cfg.language or "FR"
         bitrate = cfg.bitrate.upper()
-        tag     = cfg.encoded_by or "HellTrucker"
+        tag     = group or "SCENE"
         parts   = []
         if series:
             parts.append(_dot(series))

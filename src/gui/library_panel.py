@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem,
     QHeaderView, QLineEdit, QLabel, QAbstractItemView, QMenu,
     QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QMessageBox,
-    QCheckBox, QPushButton, QScrollArea, QStackedWidget, QSlider,
+    QCheckBox, QPushButton, QScrollArea, QStackedWidget,
     QStyle, QStyleOptionButton,
 )
 from PyQt6.QtCore import Qt, QPoint, QRect, QSize, QTimer, pyqtSignal

@@ -24,7 +24,6 @@ TAG_MAPPING = {
     "language":  ["language"],
     "asin":      ["asin"],
     "publisher": ["publisher", "organization", "label"],
-    # encoded_by est la signature personnelle — jamais importé depuis la source
 }
 
 FIELD_LABELS = {
