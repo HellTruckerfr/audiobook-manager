@@ -796,6 +796,7 @@ class SceneCopyPanel(QWidget):
         dir_ctx = {**full_ctx, "series_release": series_release, "book_release": book_release}
         if fmt == "MP3":
             dir_ctx["tag_album"] = stem
+            return _render_dir(dir_tpl, dir_ctx)
         return os.path.join(_render_dir(dir_tpl, dir_ctx), stem + ext)
 
     def _update_preview(self):
