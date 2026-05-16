@@ -32,8 +32,6 @@ N_EXTRA      = len(EXTRA_COLS)
 COL_CHECK   = 0
 COL_TITLE   = 1
 COL_AUTHOR  = 2
-
-_ASCENDING_ONLY_COLS = {3, 4, 5}  # Univers, Série, Volume
 # 3 .. 2+N_EXTRA  → colonnes extra
 COL_SOURCE  = 3 + N_EXTRA   # Qualité source (meilleure dispo + sélecteur)
 COL_STATUS  = 4 + N_EXTRA   # État
@@ -95,6 +93,23 @@ def _norm(s: str) -> str:
     )
 
 
+def _book_sort_value(book, col: int):
+    """Valeur de tri pour un livre sur une colonne donnée."""
+    cfg = book.config
+    if col == COL_TITLE:  return _norm(book.display_title)
+    if col == COL_AUTHOR: return _norm(book.display_author)
+    extra_idx = col - 3
+    if 0 <= extra_idx < N_EXTRA:
+        field = EXTRA_FIELDS[extra_idx]
+        val = getattr(cfg, field, "") or ""
+        if field == "volume": return _vol_key(val)[0]
+        return _norm(val)
+    if col == COL_STATUS:
+        icon_fn, _ = _combined_status(book)
+        return _STATUS_SORT.get(icon_fn, 99)
+    return ""
+
+
 class _SortableItem(QTableWidgetItem):
     """QTableWidgetItem dont le tri utilise une clé composite (tuple)."""
     def __init__(self, text: str, sort_key: tuple):
@@ -127,7 +142,7 @@ def _make_item(text: str, center: bool = False,
 def _vol_key(vol: str):
     if not vol:
         return (999, "")
-    m = re.match(r'^(\d+(?:\.\d+)?)', vol.strip())
+    m = re.search(r'(\d+(?:\.\d+)?)', vol.strip())
     return (float(m.group(1)), vol) if m else (999, vol)
 
 
@@ -616,13 +631,15 @@ class CatalogueView(QWidget):
 
 class _CheckHeaderView(QHeaderView):
     """QHeaderView qui dessine une checkbox native Qt dans la colonne 0."""
-    check_toggled = pyqtSignal(bool)   # True = tout cocher
+    check_toggled = pyqtSignal(bool)        # True = tout cocher
+    sort_clicked  = pyqtSignal(int, bool)   # (section, shift_held)
 
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
-        self._check_col = 0
-        self._checked   = False
-        self._partial   = False
+        self._check_col  = 0
+        self._checked    = False
+        self._partial    = False
+        self._sort_state: list = []   # [(col, Qt.SortOrder), ...]
         self.setSectionsClickable(True)
 
     def set_state(self, checked: bool, partial: bool = False):
@@ -633,6 +650,10 @@ class _CheckHeaderView(QHeaderView):
         self.viewport().update(
             self.sectionViewportPosition(self._check_col), 0,
             self.sectionSize(self._check_col), self.height())
+
+    def set_sort_state(self, sort_cols: list):
+        self._sort_state = sort_cols
+        self.viewport().update()
 
     def paintSection(self, painter, rect, logicalIndex):
         painter.save()
@@ -654,13 +675,31 @@ class _CheckHeaderView(QHeaderView):
                              | QStyle.StateFlag.State_Enabled)
             self.style().drawPrimitive(
                 QStyle.PrimitiveElement.PE_IndicatorCheckBox, opt, painter)
+        else:
+            # Indicateur secondaire (rang ≥ 2) : petit chiffre + flèche en haut à droite
+            for rank, (col, order) in enumerate(self._sort_state):
+                if col == logicalIndex and rank > 0:
+                    arrow = "▲" if order == Qt.SortOrder.AscendingOrder else "▼"
+                    text = f"{rank + 1}{arrow}"
+                    font = painter.font()
+                    font.setPointSize(6)
+                    font.setBold(True)
+                    painter.setFont(font)
+                    painter.setPen(QColor("#4a9eff"))
+                    painter.drawText(
+                        rect.adjusted(2, 3, -6, 0),
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                        text)
+                    break
         painter.restore()
 
     def mousePressEvent(self, event):
-        if self.logicalIndexAt(event.pos()) == self._check_col:
+        col = self.logicalIndexAt(event.pos())
+        if col == self._check_col:
             self.check_toggled.emit(not self._checked)
             return
-        super().mousePressEvent(event)
+        shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        self.sort_clicked.emit(col, shift)
 
 
 # ── Library panel ──────────────────────────────────────────────────────────
@@ -832,9 +871,10 @@ class LibraryPanel(QWidget):
         self._check_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._check_header.customContextMenuRequested.connect(self._show_header_menu)
         self._check_header.setSectionsClickable(True)
-        self._check_header.sectionClicked.connect(self._on_header_clicked)
         self._check_header.check_toggled.connect(self._on_check_header_toggled)
-        self._check_header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
+        self._check_header.sort_clicked.connect(self._on_sort_clicked)
+        self._table.setSortingEnabled(False)
+        self._sort_cols: list = []   # [(col, Qt.SortOrder), ...]
 
         self._rebuild_columns()
 
@@ -1003,10 +1043,14 @@ class LibraryPanel(QWidget):
             return True
 
         books = [b for b in self._books if _keep(b)]
-        books.sort(key=lambda b: b.display_title.lower())
+        if self._sort_cols:
+            for col, order in reversed(self._sort_cols):
+                reverse = order == Qt.SortOrder.DescendingOrder
+                books.sort(key=lambda b, c=col: _book_sort_value(b, c), reverse=reverse)
+        else:
+            books.sort(key=lambda b: b.display_title.lower())
         self._filtered_books = books
 
-        self._table.setSortingEnabled(False)
         self._populating = True
         try:
             self._table.setRowCount(len(books))
@@ -1035,27 +1079,9 @@ class LibraryPanel(QWidget):
                 self._table.setItem(row, COL_TITLE,  _make_item(book.display_title, book_id=book.id))
                 self._table.setItem(row, COL_AUTHOR, _make_item(book.display_author))
 
-                cfg  = book.config
-                title_norm = _norm(book.display_title)
-                try:
-                    u_order = int(cfg.universe_order or "0")
-                except (ValueError, TypeError):
-                    u_order = 999
-                vol_f = _vol_key(cfg.volume)[0]
-
                 for i, field in enumerate(EXTRA_FIELDS):
-                    val = getattr(cfg, field, "") or ""
-                    if field == "parent_series":
-                        item = _SortableItem(val, (
-                            _norm(val), u_order, _norm(cfg.series or ""), vol_f, title_norm))
-                    elif field == "series":
-                        item = _SortableItem(val, (
-                            _norm(cfg.parent_series or ""), _norm(val), vol_f, title_norm))
-                    elif field == "volume":
-                        item = _SortableItem(val, (vol_f, title_norm))
-                    else:
-                        item = _make_item(val)
-                    self._table.setItem(row, 3 + i, item)
+                    val = getattr(book.config, field, "") or ""
+                    self._table.setItem(row, 3 + i, _make_item(val))
 
                 # Source : meilleure source + indicateur de sélection possible
                 src = book.selected_source
@@ -1085,8 +1111,8 @@ class LibraryPanel(QWidget):
         finally:
             self._populating = False
 
-        self._table.setSortingEnabled(True)
         self._update_check_header()
+        self._update_sort_indicators()
         n_visible = len(books)
         self._count_lbl.setText(f"{n_visible} livre{'s' if n_visible != 1 else ''}")
 
@@ -1160,16 +1186,37 @@ class LibraryPanel(QWidget):
                     books.append(book)
         return books
 
-    def _on_header_clicked(self, section: int):
-        pass  # col 0 handled by _check_header.check_toggled; other cols unused
+    def _on_sort_clicked(self, col: int, shift: bool):
+        existing_idx = next((i for i, (c, _) in enumerate(self._sort_cols) if c == col), -1)
+        if not shift:
+            if existing_idx == 0 and len(self._sort_cols) == 1:
+                _, cur = self._sort_cols[0]
+                new_ord = (Qt.SortOrder.DescendingOrder
+                           if cur == Qt.SortOrder.AscendingOrder
+                           else Qt.SortOrder.AscendingOrder)
+                self._sort_cols = [(col, new_ord)]
+            else:
+                self._sort_cols = [(col, Qt.SortOrder.AscendingOrder)]
+        else:
+            if existing_idx >= 0:
+                _, cur = self._sort_cols[existing_idx]
+                new_ord = (Qt.SortOrder.DescendingOrder
+                           if cur == Qt.SortOrder.AscendingOrder
+                           else Qt.SortOrder.DescendingOrder)
+                self._sort_cols[existing_idx] = (col, new_ord)
+            else:
+                self._sort_cols.append((col, Qt.SortOrder.AscendingOrder))
+        self._refresh()
 
-    def _on_sort_indicator_changed(self, section: int, order):
-        if order == Qt.SortOrder.DescendingOrder and section in _ASCENDING_ONLY_COLS:
-            hh = self._table.horizontalHeader()
-            hh.blockSignals(True)
-            hh.setSortIndicator(section, Qt.SortOrder.AscendingOrder)
-            hh.blockSignals(False)
-            self._table.sortItems(section, Qt.SortOrder.AscendingOrder)
+    def _update_sort_indicators(self):
+        hh = self._check_header
+        if self._sort_cols:
+            primary_col, primary_ord = self._sort_cols[0]
+            hh.setSortIndicatorShown(True)
+            hh.setSortIndicator(primary_col, primary_ord)
+        else:
+            hh.setSortIndicatorShown(False)
+        hh.set_sort_state(self._sort_cols)
 
     def _on_check_header_toggled(self, checked: bool):
         target = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
