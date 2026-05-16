@@ -9,7 +9,7 @@
 ; Output : dist/AudiobookManager-Setup.exe
 
 #define AppName      "Audiobook Manager"
-#define AppVersion   "1.0.2"
+#define AppVersion   "1.0.3"
 #define AppPublisher "HellTrucker"
 #define AppExeName   "AudiobookManager.exe"
 #define SourceDir    "C:\AudiobookManager-dist\AudiobookManager"
