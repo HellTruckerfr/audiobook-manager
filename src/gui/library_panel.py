@@ -1,7 +1,6 @@
 import os
 import re
 import subprocess
-import unicodedata
 from typing import List, Optional
 
 from PyQt6.QtWidgets import (
@@ -85,44 +84,6 @@ class _StatusItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
-def _norm(s: str) -> str:
-    """Clé texte insensible à la casse et aux accents."""
-    return "".join(
-        c for c in unicodedata.normalize("NFD", s.casefold())
-        if unicodedata.category(c) != "Mn"
-    )
-
-
-def _book_sort_value(book, col: int):
-    """Valeur de tri pour un livre sur une colonne donnée."""
-    cfg = book.config
-    if col == COL_TITLE:  return _norm(book.display_title)
-    if col == COL_AUTHOR: return _norm(book.display_author)
-    extra_idx = col - 3
-    if 0 <= extra_idx < N_EXTRA:
-        field = EXTRA_FIELDS[extra_idx]
-        val = getattr(cfg, field, "") or ""
-        if field == "volume": return _vol_key(val)[0]
-        return _norm(val)
-    if col == COL_STATUS:
-        icon_fn, _ = _combined_status(book)
-        return _STATUS_SORT.get(icon_fn, 99)
-    return ""
-
-
-class _SortableItem(QTableWidgetItem):
-    """QTableWidgetItem dont le tri utilise une clé composite (tuple)."""
-    def __init__(self, text: str, sort_key: tuple):
-        super().__init__(text)
-        self.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        self._sk = sort_key
-
-    def __lt__(self, other):
-        if isinstance(other, _SortableItem):
-            return self._sk < other._sk
-        return super().__lt__(other)
-
-
 def _make_item(text: str, center: bool = False,
                color: Optional[str] = None, book_id: Optional[str] = None) -> QTableWidgetItem:
     item = QTableWidgetItem(text)
@@ -142,7 +103,7 @@ def _make_item(text: str, center: bool = False,
 def _vol_key(vol: str):
     if not vol:
         return (999, "")
-    m = re.search(r'(\d+(?:\.\d+)?)', vol.strip())
+    m = re.match(r'^(\d+(?:\.\d+)?)', vol.strip())
     return (float(m.group(1)), vol) if m else (999, vol)
 
 
@@ -631,15 +592,13 @@ class CatalogueView(QWidget):
 
 class _CheckHeaderView(QHeaderView):
     """QHeaderView qui dessine une checkbox native Qt dans la colonne 0."""
-    check_toggled = pyqtSignal(bool)        # True = tout cocher
-    sort_clicked  = pyqtSignal(int, bool)   # (section, shift_held)
+    check_toggled = pyqtSignal(bool)   # True = tout cocher
 
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
-        self._check_col  = 0
-        self._checked    = False
-        self._partial    = False
-        self._sort_state: list = []   # [(col, Qt.SortOrder), ...]
+        self._check_col = 0
+        self._checked   = False
+        self._partial   = False
         self.setSectionsClickable(True)
 
     def set_state(self, checked: bool, partial: bool = False):
@@ -650,10 +609,6 @@ class _CheckHeaderView(QHeaderView):
         self.viewport().update(
             self.sectionViewportPosition(self._check_col), 0,
             self.sectionSize(self._check_col), self.height())
-
-    def set_sort_state(self, sort_cols: list):
-        self._sort_state = sort_cols
-        self.viewport().update()
 
     def paintSection(self, painter, rect, logicalIndex):
         painter.save()
@@ -675,31 +630,13 @@ class _CheckHeaderView(QHeaderView):
                              | QStyle.StateFlag.State_Enabled)
             self.style().drawPrimitive(
                 QStyle.PrimitiveElement.PE_IndicatorCheckBox, opt, painter)
-        else:
-            # Indicateur secondaire (rang ≥ 2) : petit chiffre + flèche en haut à droite
-            for rank, (col, order) in enumerate(self._sort_state):
-                if col == logicalIndex and rank > 0:
-                    arrow = "▲" if order == Qt.SortOrder.AscendingOrder else "▼"
-                    text = f"{rank + 1}{arrow}"
-                    font = painter.font()
-                    font.setPointSize(6)
-                    font.setBold(True)
-                    painter.setFont(font)
-                    painter.setPen(QColor("#4a9eff"))
-                    painter.drawText(
-                        rect.adjusted(2, 3, -6, 0),
-                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
-                        text)
-                    break
         painter.restore()
 
     def mousePressEvent(self, event):
-        col = self.logicalIndexAt(event.pos())
-        if col == self._check_col:
+        if self.logicalIndexAt(event.pos()) == self._check_col:
             self.check_toggled.emit(not self._checked)
             return
-        shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-        self.sort_clicked.emit(col, shift)
+        super().mousePressEvent(event)
 
 
 # ── Library panel ──────────────────────────────────────────────────────────
@@ -871,10 +808,8 @@ class LibraryPanel(QWidget):
         self._check_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._check_header.customContextMenuRequested.connect(self._show_header_menu)
         self._check_header.setSectionsClickable(True)
+        self._check_header.sectionClicked.connect(self._on_header_clicked)
         self._check_header.check_toggled.connect(self._on_check_header_toggled)
-        self._check_header.sort_clicked.connect(self._on_sort_clicked)
-        self._table.setSortingEnabled(False)
-        self._sort_cols: list = []   # [(col, Qt.SortOrder), ...]
 
         self._rebuild_columns()
 
@@ -1043,14 +978,10 @@ class LibraryPanel(QWidget):
             return True
 
         books = [b for b in self._books if _keep(b)]
-        if self._sort_cols:
-            for col, order in reversed(self._sort_cols):
-                reverse = order == Qt.SortOrder.DescendingOrder
-                books.sort(key=lambda b, c=col: _book_sort_value(b, c), reverse=reverse)
-        else:
-            books.sort(key=lambda b: b.display_title.lower())
+        books.sort(key=lambda b: b.display_title.lower())
         self._filtered_books = books
 
+        self._table.setSortingEnabled(False)
         self._populating = True
         try:
             self._table.setRowCount(len(books))
@@ -1111,8 +1042,8 @@ class LibraryPanel(QWidget):
         finally:
             self._populating = False
 
+        self._table.setSortingEnabled(True)
         self._update_check_header()
-        self._update_sort_indicators()
         n_visible = len(books)
         self._count_lbl.setText(f"{n_visible} livre{'s' if n_visible != 1 else ''}")
 
@@ -1186,37 +1117,8 @@ class LibraryPanel(QWidget):
                     books.append(book)
         return books
 
-    def _on_sort_clicked(self, col: int, shift: bool):
-        existing_idx = next((i for i, (c, _) in enumerate(self._sort_cols) if c == col), -1)
-        if not shift:
-            if existing_idx == 0 and len(self._sort_cols) == 1:
-                _, cur = self._sort_cols[0]
-                new_ord = (Qt.SortOrder.DescendingOrder
-                           if cur == Qt.SortOrder.AscendingOrder
-                           else Qt.SortOrder.AscendingOrder)
-                self._sort_cols = [(col, new_ord)]
-            else:
-                self._sort_cols = [(col, Qt.SortOrder.AscendingOrder)]
-        else:
-            if existing_idx >= 0:
-                _, cur = self._sort_cols[existing_idx]
-                new_ord = (Qt.SortOrder.DescendingOrder
-                           if cur == Qt.SortOrder.AscendingOrder
-                           else Qt.SortOrder.DescendingOrder)
-                self._sort_cols[existing_idx] = (col, new_ord)
-            else:
-                self._sort_cols.append((col, Qt.SortOrder.AscendingOrder))
-        self._refresh()
-
-    def _update_sort_indicators(self):
-        hh = self._check_header
-        if self._sort_cols:
-            primary_col, primary_ord = self._sort_cols[0]
-            hh.setSortIndicatorShown(True)
-            hh.setSortIndicator(primary_col, primary_ord)
-        else:
-            hh.setSortIndicatorShown(False)
-        hh.set_sort_state(self._sort_cols)
+    def _on_header_clicked(self, section: int):
+        pass  # col 0 handled by _check_header.check_toggled; other cols unused
 
     def _on_check_header_toggled(self, checked: bool):
         target = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
