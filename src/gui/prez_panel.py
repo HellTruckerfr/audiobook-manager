@@ -258,6 +258,7 @@ class PrezPanel(QWidget):
 
     def refresh_books(self):
         all_books = list(self.app.scanner.load_last_books() or [])
+        self._library_books = all_books
         self._detect_scene_copies(all_books)
         self._all_books = [
             b for b in all_books
@@ -337,6 +338,7 @@ class PrezPanel(QWidget):
         self._rescan_btn.setText("...")
         try:
             all_books = list(self.app.scanner.load_last_books() or [])
+            self._library_books = all_books
             self._detect_scene_copies(all_books)
             self._all_books = [
                 b for b in all_books
@@ -449,7 +451,8 @@ class PrezPanel(QWidget):
         fmt        = self._fmt_cb.currentData()
         audio_info = self._get_scene_info(self._current, fmt)
         bbcode = generate_prez(self._current, rating=rating, fmt=fmt,
-                               audio_info=audio_info)
+                               audio_info=audio_info,
+                               all_books=getattr(self, "_library_books", None))
         self._bbcode_edit.setPlainText(bbcode)
 
         if self._tabs.currentIndex() == 1:

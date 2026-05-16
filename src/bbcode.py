@@ -23,7 +23,8 @@ def _size_display(info: AudioInfo) -> str:
     return f"{info.size_mb / 1024:.2f} GiB"
 
 
-def _title_lines(cfg, fmt_label: str = "M4B") -> list:
+def _title_lines(cfg, fmt_label: str = "M4B",
+                 universe_vol: "int | None" = None) -> list:
     """Retourne 1 ou 2 lignes de titre selon la présence d'une série."""
     author = cfg.author or "?"
     title  = cfg.title or "?"
@@ -34,29 +35,64 @@ def _title_lines(cfg, fmt_label: str = "M4B") -> list:
         bracket = f"[{cfg.volume}]" if cfg.volume else "[Intégrale]"
         lines.append(f"[size=6][color=#eab308][b]{cfg.series} {bracket}[/b][/color][/size]")
     if cfg.parent_series:
-        try:
-            n = int(cfg.universe_order)
-            prefix = f" {_fr_ordinal(n)} volume de l'univers"
-        except (ValueError, TypeError, AttributeError):
+        if universe_vol is not None:
+            prefix = f" {_fr_ordinal(universe_vol)} volume de l'univers"
+        else:
             prefix = " Fait partie de l'univers"
         lines.append(f"[size=4][color=#eab308][i]{prefix} : {cfg.parent_series}[/i][/color][/size]")
     return lines
 
 
+def _compute_universe_volume(book: BookEntry, all_books: list) -> "int | None":
+    """Calcule la position globale du livre dans son univers.
+
+    Pour chaque sous-série précédente (universe_order < le nôtre), on prend
+    le max des volumes présents dans la bibliothèque et on additionne.
+    """
+    cfg = book.config
+    if not cfg.parent_series or not cfg.universe_order or not cfg.volume:
+        return None
+    try:
+        current_order = int(cfg.universe_order)
+        current_vol   = int(cfg.volume)
+    except (ValueError, TypeError):
+        return None
+
+    max_per_order: dict = {}
+    for b in all_books:
+        bc = b.config
+        if bc.parent_series != cfg.parent_series:
+            continue
+        try:
+            order = int(bc.universe_order)
+            vol   = int(bc.volume)
+        except (ValueError, TypeError):
+            continue
+        if order < current_order:
+            max_per_order[order] = max(max_per_order.get(order, 0), vol)
+
+    return sum(max_per_order.values()) + current_vol
+
+
 def generate_prez(book: BookEntry, rating: str = "", fmt: str = "m4b",
-                  audio_info: "AudioInfo | None" = None) -> str:
+                  audio_info: "AudioInfo | None" = None,
+                  all_books: "list | None" = None) -> str:
     cfg = book.config
     fmt_label = "M4B" if fmt == "m4b" else "MP3"
     info: AudioInfo | None = audio_info if audio_info is not None else (
         book.output_m4b_info if fmt == "m4b" else book.output_mp3_info
     )
 
+    universe_vol: "int | None" = None
+    if all_books is not None:
+        universe_vol = _compute_universe_volume(book, all_books)
+
     lines = ["[center]"]
 
     if cfg.cover_url:
         lines.append(f"[img]{cfg.cover_url}[/img]")
 
-    lines += _title_lines(cfg, fmt_label)
+    lines += _title_lines(cfg, fmt_label, universe_vol)
     lines.append("")
 
     if rating:
