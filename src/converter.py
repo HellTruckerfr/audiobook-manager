@@ -375,21 +375,53 @@ class Converter:
             if log_cb:
                 log_cb(msg, level)
 
-        m4b_path = book.output_m4b_path
-        if not m4b_path or not os.path.isfile(m4b_path):
-            done_cb(False, "Fichier M4B de sortie introuvable — convertir en M4B d'abord")
+        src = self._select_m4b_source(book)
+        if not src:
+            done_cb(False, "Aucune source sélectionnée")
             return
 
-        chapters = _get_m4b_chapters(m4b_path)
-        if not chapters:
-            # Pas de chapitres embarqués → exporter le fichier entier comme un seul MP3
-            title = book.config.title or book.detected_title or "Track"
-            chapters = [{"index": 1, "title": title, "start": 0.0, "end": None}]
+        cfg        = book.config
+        bitrate    = cfg.bitrate or "128k"
+        is_folder  = os.path.isdir(src.path)
+        audio_exts = {".mp3", ".m4b", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
+
+        if is_folder:
+            # Dossier : un fichier = un chapitre, encodage direct sans découpe
+            if book.chapters and all(ch.source_path and os.path.isfile(ch.source_path)
+                                     for ch in book.chapters):
+                chapters = [
+                    {"index": i + 1, "title": ch.title or f"Chapitre {i + 1}",
+                     "start": 0.0, "end": None, "_file": ch.source_path}
+                    for i, ch in enumerate(book.chapters)
+                ]
+                total_dur_mp3 = sum(ch.duration_s for ch in book.chapters) or 3600
+            else:
+                files = sorted([
+                    os.path.join(src.path, f) for f in os.listdir(src.path)
+                    if os.path.splitext(f)[1].lower() in audio_exts
+                ])
+                if not files:
+                    done_cb(False, "Aucun fichier audio trouvé dans la source")
+                    return
+                chapters = [
+                    {"index": i + 1, "title": f"Chapitre {i + 1}",
+                     "start": 0.0, "end": None, "_file": f}
+                    for i, f in enumerate(files)
+                ]
+                total_dur_mp3 = len(files) * 3600
+        else:
+            # Fichier unique : découpe par timestamps
+            chapters = _get_m4b_chapters(src.path)
+            if not chapters:
+                title = cfg.title or book.detected_title or "Track"
+                chapters = [{"index": 1, "title": title, "start": 0.0, "end": None}]
+            total_dur_mp3 = sum(
+                (ch["end"] - ch["start"]) if ch.get("end") else 0
+                for ch in chapters
+            ) or 3600
 
         n   = len(chapters)
         pad = len(str(n))
-        cfg = book.config
-        bitrate = cfg.bitrate or "128k"
 
         try:
             os.makedirs(output_dir, exist_ok=True)
@@ -398,7 +430,7 @@ class Converter:
             return
 
         log(f"▶  MP3 : {book.display_title}", "start")
-        log(f"   Source    : {m4b_path}", "detail")
+        log(f"   Source    : {src.path}", "detail")
         log(f"   Sortie    : {output_dir}", "detail")
         log(f"   Chapitres : {n}  ·  Bitrate : {bitrate}", "detail")
 
@@ -412,13 +444,9 @@ class Converter:
         book_author = cfg.author or book.detected_author
         narrator    = cfg.narrator or book_author
 
-        total_dur_mp3 = sum(
-            (ch["end"] - ch["start"]) if ch.get("end") else 0
-            for ch in chapters
-        ) or 3600
         _per_ch_timeout = max(300, int(total_dur_mp3 / max(n, 1) * 2) + 60)
 
-        # Cover : depuis l'éditeur en priorité, watermark si activé, sinon extrait du M4B
+        # Cover : depuis l'éditeur en priorité, watermark si activé, sinon extrait de la source
         _fd, _cover_raw = tempfile.mkstemp(suffix=".jpg")
         os.close(_fd)
         _fd, _cover_wm = tempfile.mkstemp(suffix=".jpg")
@@ -426,8 +454,10 @@ class Converter:
         cover_path: str | None = None
 
         _raw = cfg.cover_path if (cfg.cover_path and os.path.isfile(cfg.cover_path)) else None
-        if not _raw and _extract_cover(m4b_path, _cover_raw):
-            _raw = _cover_raw
+        if not _raw:
+            sample = src.path if not is_folder else _first_audio(src.path)
+            if sample and _extract_cover(sample, _cover_raw):
+                _raw = _cover_raw
         if _raw:
             if cfg.watermark and self.cfg.app_config.logo_path:
                 if _apply_watermark(_raw, self.cfg.app_config.logo_path,
@@ -445,13 +475,22 @@ class Converter:
             safe = _clean_filename(ch["title"]) or f"Chapitre {ch['index']}"
             out_file = os.path.join(output_dir, f"{i + 1:0{pad}d} - {safe}.mp3")
 
-            args = ["ffmpeg", "-threads", "1", "-loglevel", "error",
-                    "-ss", str(ch["start"]),
-                    "-i", self._p(m4b_path)]
+            if "_file" in ch:
+                # Dossier : encode le fichier entier directement
+                args = ["ffmpeg", "-threads", "1", "-loglevel", "error",
+                        "-i", self._p(ch["_file"])]
+            else:
+                # Fichier unique : découpe par timestamp
+                args = ["ffmpeg", "-threads", "1", "-loglevel", "error",
+                        "-ss", str(ch["start"]),
+                        "-i", self._p(src.path)]
+
             if cover_path:
                 args += ["-i", self._p(cover_path)]
-            if ch["end"] is not None:
+
+            if "_file" not in ch and ch["end"] is not None:
                 args += ["-t", str(ch["end"] - ch["start"])]
+
             args += ["-map", "0:a"]
             if cover_path:
                 args += ["-map", "1:v", "-c:v", "copy"]
