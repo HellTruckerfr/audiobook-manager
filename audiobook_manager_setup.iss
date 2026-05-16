@@ -12,7 +12,7 @@
 #define AppVersion   "1.0.4"
 #define AppPublisher "HellTrucker"
 #define AppExeName   "AudiobookManager.exe"
-#define SourceDir    "C:\AudiobookManager-dist\AudiobookManager"
+#define SourceDir    "C:\Users\winte\workspace claude\audiobook-manager\dist\AudiobookManager"
 
 [Setup]
 AppId={{F3A2C8B1-4D7E-4F9A-B2C3-1A2B3C4D5E6F}
