@@ -32,6 +32,8 @@ N_EXTRA      = len(EXTRA_COLS)
 COL_CHECK   = 0
 COL_TITLE   = 1
 COL_AUTHOR  = 2
+
+_ASCENDING_ONLY_COLS = {3, 4, 5}  # Univers, Série, Volume
 # 3 .. 2+N_EXTRA  → colonnes extra
 COL_SOURCE  = 3 + N_EXTRA   # Qualité source (meilleure dispo + sélecteur)
 COL_STATUS  = 4 + N_EXTRA   # État
@@ -832,6 +834,7 @@ class LibraryPanel(QWidget):
         self._check_header.setSectionsClickable(True)
         self._check_header.sectionClicked.connect(self._on_header_clicked)
         self._check_header.check_toggled.connect(self._on_check_header_toggled)
+        self._check_header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
 
         self._rebuild_columns()
 
@@ -1044,10 +1047,10 @@ class LibraryPanel(QWidget):
                     val = getattr(cfg, field, "") or ""
                     if field == "parent_series":
                         item = _SortableItem(val, (
-                            _norm(val), u_order, vol_f, title_norm))
+                            _norm(val), u_order, _norm(cfg.series or ""), vol_f, title_norm))
                     elif field == "series":
                         item = _SortableItem(val, (
-                            _norm(val), vol_f, title_norm))
+                            _norm(cfg.parent_series or ""), _norm(val), vol_f, title_norm))
                     elif field == "volume":
                         item = _SortableItem(val, (vol_f, title_norm))
                     else:
@@ -1159,6 +1162,14 @@ class LibraryPanel(QWidget):
 
     def _on_header_clicked(self, section: int):
         pass  # col 0 handled by _check_header.check_toggled; other cols unused
+
+    def _on_sort_indicator_changed(self, section: int, order):
+        if order == Qt.SortOrder.DescendingOrder and section in _ASCENDING_ONLY_COLS:
+            hh = self._table.horizontalHeader()
+            hh.blockSignals(True)
+            hh.setSortIndicator(section, Qt.SortOrder.AscendingOrder)
+            hh.blockSignals(False)
+            self._table.sortItems(section, Qt.SortOrder.AscendingOrder)
 
     def _on_check_header_toggled(self, checked: bool):
         target = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
