@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import unicodedata
 from typing import List, Optional
 
 from PyQt6.QtWidgets import (
@@ -81,6 +82,27 @@ class _StatusItem(QTableWidgetItem):
     def __lt__(self, other):
         if isinstance(other, _StatusItem):
             return self._sort_key < other._sort_key
+        return super().__lt__(other)
+
+
+def _norm(s: str) -> str:
+    """Clé texte insensible à la casse et aux accents."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s.casefold())
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+class _SortableItem(QTableWidgetItem):
+    """QTableWidgetItem dont le tri utilise une clé composite (tuple)."""
+    def __init__(self, text: str, sort_key: tuple):
+        super().__init__(text)
+        self.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        self._sk = sort_key
+
+    def __lt__(self, other):
+        if isinstance(other, _SortableItem):
+            return self._sk < other._sk
         return super().__lt__(other)
 
 
@@ -1010,9 +1032,27 @@ class LibraryPanel(QWidget):
                 self._table.setItem(row, COL_TITLE,  _make_item(book.display_title, book_id=book.id))
                 self._table.setItem(row, COL_AUTHOR, _make_item(book.display_author))
 
+                cfg  = book.config
+                title_norm = _norm(book.display_title)
+                try:
+                    u_order = int(cfg.universe_order or "0")
+                except (ValueError, TypeError):
+                    u_order = 999
+                vol_f = _vol_key(cfg.volume)[0]
+
                 for i, field in enumerate(EXTRA_FIELDS):
-                    val = getattr(book.config, field, "") or ""
-                    self._table.setItem(row, 3 + i, _make_item(val))
+                    val = getattr(cfg, field, "") or ""
+                    if field == "parent_series":
+                        item = _SortableItem(val, (
+                            _norm(val), u_order, vol_f, title_norm))
+                    elif field == "series":
+                        item = _SortableItem(val, (
+                            _norm(val), vol_f, title_norm))
+                    elif field == "volume":
+                        item = _SortableItem(val, (vol_f, title_norm))
+                    else:
+                        item = _make_item(val)
+                    self._table.setItem(row, 3 + i, item)
 
                 # Source : meilleure source + indicateur de sélection possible
                 src = book.selected_source
