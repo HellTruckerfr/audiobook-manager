@@ -9,10 +9,14 @@ from .icon_utils import get_icon
 
 
 _FIELDS = [
-    ("author",    "Auteurs"),
-    ("series",    "Séries"),
-    ("narrator",  "Narrateurs"),
-    ("publisher", "Éditeurs"),
+    ("author",         "Auteurs"),
+    ("parent_series",  "Univers"),
+    ("universe_order", "Rangs univers"),
+    ("series",         "Séries"),
+    ("narrator",       "Narrateurs"),
+    ("publisher",      "Éditeurs"),
+    ("year",           "Années"),
+    ("language",       "Langues"),
 ]
 
 

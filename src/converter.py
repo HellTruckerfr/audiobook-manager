@@ -1125,7 +1125,10 @@ def build_mp3_output_dir(book: "BookEntry", output_mp3: str) -> str:
     else:
         folder_name = _clean_filename(cfg.title or book.detected_title)
 
+    parent = _clean_filename(cfg.parent_series or "")
     parts = [output_mp3, author]
+    if parent:
+        parts.append(parent)
     if series:
         parts.append(series)
     parts.append(folder_name)
@@ -1146,13 +1149,16 @@ def _dot(s: str) -> str:
 def build_output_subdir(book: BookEntry, style: str = "perso") -> str:
     """
     Retourne le sous-dossier relatif à l'auteur.
-    Perso : 'The Expanse' (serie subfolder)
-    Scène : '' (serie dans le nom de fichier)
+    Perso : '[Univers/]Série' (avec couche univers si renseigné)
+    Scène : '' (série dans le nom de fichier)
     """
     if style == "scene":
         return ""
-    series = book.display_series
-    return _clean_filename(series) if series else ""
+    parent = _clean_filename(book.config.parent_series or "")
+    series = _clean_filename(book.display_series) if book.display_series else ""
+    if parent and series:
+        return os.path.join(parent, series)
+    return parent or series
 
 
 def build_output_filename(book: BookEntry, style: str = "perso", group: str = "") -> str:

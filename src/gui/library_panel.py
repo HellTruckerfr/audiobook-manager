@@ -24,8 +24,8 @@ COL_WIDTHS_KEY    = "library_col_widths"
 HIDE_COMPLETE_KEY = "library_hide_complete"
 EXTRA_SHOWN_KEY   = "library_shown_extra_cols"
 
-EXTRA_COLS   = ["Série", "Volume", "Narrateur", "Année", "Langue", "Éditeur"]
-EXTRA_FIELDS = ["series", "volume", "narrator", "year", "language", "publisher"]
+EXTRA_COLS   = ["Univers", "Série", "Volume", "Narrateur", "Année", "Langue", "Éditeur"]
+EXTRA_FIELDS = ["parent_series", "series", "volume", "narrator", "year", "language", "publisher"]
 N_EXTRA      = len(EXTRA_COLS)
 
 COL_CHECK   = 0

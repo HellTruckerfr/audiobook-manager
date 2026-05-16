@@ -26,7 +26,7 @@ DEFAULT_METADATA_REQUIRED = ["title", "author", "narrator", "year", "asin", "cov
 
 # Template dossier : {author_raw} = auteur brut, {series_release} = nom calculé du dossier série,
 # {book_release} = nom calculé du dossier livre. Les segments vides sont supprimés.
-DEFAULT_SCENE_COPY_DIR_TEMPLATE = "{author_raw}/{series_raw}/{tag_album}"
+DEFAULT_SCENE_COPY_DIR_TEMPLATE = "{author_raw}/{parent_series}/{series_raw}/{tag_album}"
 
 # Template fichier : contrôle le nom de release (dossier livre ET nom de fichier).
 # Le même template est appliqué deux fois : une fois pour le dossier série (volume/title vides,

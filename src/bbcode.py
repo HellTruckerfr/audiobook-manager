@@ -2,6 +2,10 @@ import re
 from .models import BookEntry, AudioInfo
 
 
+def _fr_ordinal(n: int) -> str:
+    return "1er" if n == 1 else f"{n}ème"
+
+
 def _codec_display(codec: str) -> str:
     c = codec.lower()
     if c in ("aac", "aac_mf", "libfdk_aac"):
@@ -29,6 +33,13 @@ def _title_lines(cfg, fmt_label: str = "M4B") -> list:
     if cfg.series:
         bracket = f"[{cfg.volume}]" if cfg.volume else "[Intégrale]"
         lines.append(f"[size=6][color=#eab308][b]{cfg.series} {bracket}[/b][/color][/size]")
+    if cfg.parent_series:
+        try:
+            n = int(cfg.universe_order)
+            prefix = f" {_fr_ordinal(n)} volume de l'univers"
+        except (ValueError, TypeError, AttributeError):
+            prefix = " Fait partie de l'univers"
+        lines.append(f"[size=4][color=#eab308][i]{prefix} : {cfg.parent_series}[/i][/color][/size]")
     return lines
 
 

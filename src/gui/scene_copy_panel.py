@@ -165,7 +165,8 @@ def _build_context(book: BookEntry, all_books: List[BookEntry],
         or (m4b_info.tag_album if m4b_info and m4b_info.tag_album else None)
         or cfg.title or book.detected_title or ""
     )
-    series_raw = cfg.series or ""
+    series_raw   = cfg.series or ""
+    parent_series = cfg.parent_series or ""
 
     if series_mode:
         vol_str   = ""
@@ -190,7 +191,8 @@ def _build_context(book: BookEntry, all_books: List[BookEntry],
         "author":     author,
         "title":      title,
         "series":     series,
-        "series_raw": series_raw,
+        "series_raw":    series_raw,
+        "parent_series": parent_series,
         "volume":     vol_str,
         "integrale":  integrale,
         "year":       year,

@@ -108,6 +108,8 @@ class Chapter:
 class BookConfig:
     title: str = ""
     author: str = ""
+    parent_series: str = ""
+    universe_order: str = ""
     series: str = ""
     volume: str = ""
     narrator: str = ""
@@ -134,6 +136,8 @@ class BookConfig:
         return {
             "title": self.title,
             "author": self.author,
+            "parent_series": self.parent_series,
+            "universe_order": self.universe_order,
             "series": self.series,
             "volume": self.volume,
             "narrator": self.narrator,
@@ -163,6 +167,8 @@ class BookConfig:
         return cls(
             title=d.get("title", ""),
             author=d.get("author", ""),
+            parent_series=d.get("parent_series", ""),
+            universe_order=d.get("universe_order", ""),
             series=d.get("series", ""),
             volume=d.get("volume", ""),
             narrator=d.get("narrator", ""),

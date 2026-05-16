@@ -18,7 +18,7 @@ from ..models import BookEntry, BookConfig, Chapter, AudioInfo
 from .tag_import_dialog import TagImportDialog
 
 
-_COMBO_FIELDS = ("author", "series", "volume", "narrator", "year", "language", "publisher")
+_COMBO_FIELDS = ("author", "parent_series", "universe_order", "series", "volume", "narrator", "year", "language", "publisher")
 
 
 class _FetchThread(QThread):
@@ -203,10 +203,12 @@ class EditorPanel(QWidget):
         self._vars: dict = {}
 
         for key, label in [
-            ("title",      "Titre"),
-            ("author",     "Auteur"),
-            ("series",     "Série"),
-            ("volume",     "Volume"),
+            ("title",         "Titre"),
+            ("author",        "Auteur"),
+            ("parent_series", "Univers"),
+            ("universe_order", "Rang univers"),
+            ("series",        "Série"),
+            ("volume",        "Volume"),
             ("narrator",   "Narrateur"),
             ("genre",      "Genre"),
             ("year",       "Année"),
@@ -829,6 +831,7 @@ class EditorPanel(QWidget):
             return
         self._apply_to_config()
         self.app.config_manager.save_book(self._book)
+        self.app.library_panel.populate(self.app.library_panel._books)
 
     def navigate(self, delta: int):
         if not self._book:
