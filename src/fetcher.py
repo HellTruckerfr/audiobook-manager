@@ -88,12 +88,74 @@ def _extract_cover_url(html: str) -> str | None:
     return None
 
 
+def _extract_title(html: str) -> str | None:
+    m = re.search(r'id="productTitle"[^>]*>\s*([^<]{3,200}?)\s*<', html)
+    return m.group(1).strip() if m else None
+
+
+def _extract_contributors(html: str) -> dict:
+    """Extrait auteur, narrateur et editeur depuis le byline Amazon.
+    Structure Audible : <span class="author"><a>Nom</a>...(Role)</span>"""
+    result: dict = {"author": None, "narrator": None, "publisher": None}
+    byline_m = re.search(r'id="bylineInfo"[^>]*>(.*?)(?=<div)', html, re.DOTALL)
+    section = byline_m.group(1) if byline_m else html[:30000]
+
+    for span_m in re.finditer(
+        r'class="author[^"]*"[^>]*>(.*?)</span>\s*</span>', section, re.DOTALL
+    ):
+        span_html = span_m.group(1)
+        name_m = re.search(r'<a[^>]*>([^<]{2,80})</a>', span_html)
+        role_m = re.search(r'\(([^)]{2,40})\)', span_html)
+        if not name_m or not role_m:
+            continue
+        name = name_m.group(1).strip()
+        role = role_m.group(1).strip().lower()
+        if "auteur" in role and not result["author"]:
+            result["author"] = name
+        elif "narrateur" in role and not result["narrator"]:
+            result["narrator"] = name
+        elif ("editeur" in role or "\xe9diteur" in role) and not result["publisher"]:
+            result["publisher"] = name
+    return result
+
+
+def _extract_year(html: str) -> str | None:
+    # JSON-LD structuré (le plus fiable sur les pages Audible)
+    m = re.search(r'"datePublished"\s*:\s*"(\d{4})', html)
+    if m:
+        return m.group(1)
+    # Bullets de details Amazon — Amazon insere des chars invisibles U+200E/F
+    # autour des deux-points ; on les supprime avant le match
+    _INVIS = re.compile(r"[‎‏‪‫‬‭‮]")
+    clean = _INVIS.sub("", html)
+    for label in ("Date d'\xe9coute", "Date de publication", "Publication date"):
+        pat = rf'{re.escape(label)}\s*:?\s*</span>\s*<span[^>]*>\s*([^<]{{4,60}}?)\s*</span>'
+        m = re.search(pat, clean, re.IGNORECASE)
+        if m:
+            yr = re.search(r'\b(19|20)\d{2}\b', m.group(1))
+            if yr:
+                return yr.group(0)
+    # Fallback : année extraite du copyright  ex. "©2022 Audiolib"
+    copy = _extract_copyright(html)
+    if copy:
+        yr = re.search(r'\b(19|20)\d{2}\b', copy)
+        if yr:
+            return yr.group(0)
+    return None
+
+
 def fetch_amazon_meta(asin: str, region: str = "fr") -> dict:
-    """Récupère description, copyright et cover_url en une seule requête HTTP."""
+    """Récupère toutes les métadonnées disponibles en une seule requête HTTP."""
     html = _fetch_raw(asin, region)
     if not html:
-        return {"description": None, "copyright": None, "cover_url": None}
+        return {}
+    contributors = _extract_contributors(html)
     return {
+        "title":       _extract_title(html),
+        "author":      contributors["author"],
+        "narrator":    contributors["narrator"],
+        "publisher":   contributors["publisher"],
+        "year":        _extract_year(html),
         "description": _extract_description(html),
         "copyright":   _extract_copyright(html),
         "cover_url":   _extract_cover_url(html),

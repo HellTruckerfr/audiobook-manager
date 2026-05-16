@@ -22,8 +22,8 @@ _COMBO_FIELDS = ("author", "series", "volume", "narrator", "year", "language", "
 
 
 class _FetchThread(QThread):
-    """Récupère description, copyright et cover_url depuis Amazon en arrière-plan."""
-    success = pyqtSignal(str, str, str)   # (description, copyright, cover_url)
+    """Récupère les métadonnées depuis Amazon en arrière-plan."""
+    success = pyqtSignal(dict)
     failed  = pyqtSignal()
 
     def __init__(self, asin: str):
@@ -33,11 +33,9 @@ class _FetchThread(QThread):
     def run(self):
         from ..fetcher import fetch_amazon_meta
         result = fetch_amazon_meta(self._asin)
-        desc  = result.get("description") or ""
-        copy  = result.get("copyright")   or ""
-        cover = result.get("cover_url")   or ""
-        if desc or copy or cover:
-            self.success.emit(desc, copy, cover)
+        if any(result.get(k) for k in ("title", "author", "narrator", "publisher",
+                                        "year", "description", "copyright", "cover_url")):
+            self.success.emit(result)
         else:
             self.failed.emit()
 
@@ -250,6 +248,11 @@ class EditorPanel(QWidget):
             "même si certains champs requis sont vides.")
         tl.addWidget(self._ignore_meta_cb)
         tl.addStretch()
+        self._fetch_btn = QPushButton("  Fetch Amazon")
+        self._fetch_btn.setIcon(get_icon("fetch.ico")); self._fetch_btn.setIconSize(QSize(18, 18))
+        self._fetch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fetch_btn.clicked.connect(self._fetch_from_amazon)
+        tl.addWidget(self._fetch_btn)
 
         form.addRow("Bitrate :", tech_w)
 
@@ -263,15 +266,6 @@ class EditorPanel(QWidget):
         vl = QVBoxLayout(w)
         vl.setContentsMargins(12, 12, 12, 12)
         vl.setSpacing(8)
-
-        top = QHBoxLayout()
-        top.addStretch()
-        self._fetch_btn = QPushButton("  Fetch Amazon")
-        self._fetch_btn.setIcon(get_icon("fetch.ico")); self._fetch_btn.setIconSize(QSize(18, 18))
-        self._fetch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._fetch_btn.clicked.connect(self._fetch_from_amazon)
-        top.addWidget(self._fetch_btn)
-        vl.addLayout(top)
 
         self._desc_edit = QTextEdit()
         self._desc_edit.setPlaceholderText("Résumé du livre…")
@@ -812,13 +806,17 @@ class EditorPanel(QWidget):
         self._fetch_thread.failed.connect(self._on_fetch_failed)
         self._fetch_thread.start()
 
-    def _on_fetch_success(self, description: str, copyright_val: str, cover_url: str):
-        if description:
-            self._desc_edit.setPlainText(description)
-        if copyright_val:
-            self._vars["copyright"].setText(copyright_val)
-        if cover_url and self._book and not self._book.config.cover_url:
-            self._book.config.cover_url = cover_url
+    def _on_fetch_success(self, meta: dict):
+        # Description : toujours remplacée (c'est l'action principale du fetch)
+        if meta.get("description"):
+            self._desc_edit.setPlainText(meta["description"])
+        # Autres champs : seulement si le champ est vide
+        for key in ("title", "author", "narrator", "publisher", "year", "copyright"):
+            val = meta.get(key)
+            if val and not self._vars[key].text().strip():
+                self._vars[key].setText(val)
+        if meta.get("cover_url") and self._book and not self._book.config.cover_url:
+            self._book.config.cover_url = meta["cover_url"]
         self._fetch_btn.setEnabled(True)
         self._fetch_btn.setText("  Fetch Amazon")
 
