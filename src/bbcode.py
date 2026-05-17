@@ -43,6 +43,11 @@ def _title_lines(cfg, fmt_label: str = "M4B",
     return lines
 
 
+def _extract_int(s: str) -> "int | None":
+    m = re.search(r'\d+', s or "")
+    return int(m.group()) if m else None
+
+
 def _compute_universe_volume(book: BookEntry, all_books: list) -> "int | None":
     """Calcule la position globale du livre dans son univers.
 
@@ -52,10 +57,9 @@ def _compute_universe_volume(book: BookEntry, all_books: list) -> "int | None":
     cfg = book.config
     if not cfg.parent_series or not cfg.universe_order or not cfg.volume:
         return None
-    try:
-        current_order = int(cfg.universe_order)
-        current_vol   = int(cfg.volume)
-    except (ValueError, TypeError):
+    current_order = _extract_int(cfg.universe_order)
+    current_vol   = _extract_int(cfg.volume)
+    if current_order is None or current_vol is None:
         return None
 
     max_per_order: dict = {}
@@ -63,10 +67,9 @@ def _compute_universe_volume(book: BookEntry, all_books: list) -> "int | None":
         bc = b.config
         if bc.parent_series != cfg.parent_series:
             continue
-        try:
-            order = int(bc.universe_order)
-            vol   = int(bc.volume)
-        except (ValueError, TypeError):
+        order = _extract_int(bc.universe_order)
+        vol   = _extract_int(bc.volume)
+        if order is None or vol is None:
             continue
         if order < current_order:
             max_per_order[order] = max(max_per_order.get(order, 0), vol)
