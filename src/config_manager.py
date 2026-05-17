@@ -26,7 +26,13 @@ DEFAULT_METADATA_REQUIRED = ["title", "author", "narrator", "year", "asin", "cov
 
 # Template dossier : {author_raw} = auteur brut, {series_release} = nom calculé du dossier série,
 # {book_release} = nom calculé du dossier livre. Les segments vides sont supprimés.
-DEFAULT_SCENE_COPY_DIR_TEMPLATE = "{author_raw}/{parent_series}/{series_raw}/{tag_album}"
+DEFAULT_SCENE_COPY_DIR_TEMPLATE = "{author_raw}/{parent_series}/{series_raw}/{book_folder}"
+
+# Ancien template par défaut — migré automatiquement vers {book_folder} au chargement
+_LEGACY_DIR_TEMPLATES = {
+    "{author_raw}/{parent_series}/{series_raw}/{tag_album}",
+    "{author_raw}/{series_raw}/{tag_album}",
+}
 
 # Template fichier : contrôle le nom de release (dossier livre ET nom de fichier).
 # Le même template est appliqué deux fois : une fois pour le dossier série (volume/title vides,
@@ -113,6 +119,9 @@ class ConfigManager:
                 scan_ignore_paths=data.get("scan_ignore_paths", []),
                 ui_prefs=data.get("ui", {}),
             )
+            if self.app_config.scene_copy_dir_template in _LEGACY_DIR_TEMPLATES:
+                self.app_config.scene_copy_dir_template = DEFAULT_SCENE_COPY_DIR_TEMPLATE
+                self.save_config()
         if os.path.exists(self.library_path):
             with open(self.library_path, "r", encoding="utf-8") as f:
                 self._library = json.load(f)
