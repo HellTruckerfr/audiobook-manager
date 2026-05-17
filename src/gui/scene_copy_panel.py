@@ -37,7 +37,8 @@ _TEMPLATE_HELP = (
     "{author}  {series}  {volume}  {integrale}  {title}  {year}  "
     "{lang}  {format}  {bitrate}  {codec}  {group}\n"
     "Template dossier — variables supplémentaires : "
-    "{author_raw}  {series_raw}  {tag_album}  {series_release}  {book_release}\n"
+    "{author_raw}  {series_raw}  {tag_album}  {book_folder}  {series_release}  {book_release}\n"
+    "{book_folder} = '{series} - {volume} - {title}' pour les tomes, '{series}' pour les intégrales.\n"
     "Les segments vides sont supprimés automatiquement."
 )
 
@@ -186,6 +187,15 @@ def _build_context(book: BookEntry, all_books: List[BookEntry],
             title = ""
         year      = "" if (in_series or is_integrale) else (cfg.year or "")
 
+    if series_mode:
+        book_folder = series if series else title
+    elif in_series:
+        book_folder = " - ".join(p for p in [series, vol_str, title] if p)
+    elif is_integrale:
+        book_folder = series
+    else:
+        book_folder = title or tag_album
+
     return {
         "author_raw": author_raw,
         "author":     author,
@@ -202,6 +212,7 @@ def _build_context(book: BookEntry, all_books: List[BookEntry],
         "codec":      codec,
         "group":      group or "",
         "tag_album":  tag_album,
+        "book_folder": book_folder,
     }
 
 
