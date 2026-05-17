@@ -185,7 +185,7 @@ def _build_context(book: BookEntry, all_books: List[BookEntry],
                 and _title_matches_series(raw_title, cfg.series)
                 and _all_series_titles_match(cfg.series, all_books)):
             title = ""
-        year      = "" if is_integrale else (cfg.year or "")
+        year      = cfg.year or ""
 
     if series_mode:
         book_folder = series if series else title
