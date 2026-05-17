@@ -11,6 +11,16 @@ from .models import BookEntry, AudioInfo
 
 
 _SEP_LEN = 90
+
+_FIGLET_LINES = [
+    '██╗  ██╗███████╗██╗     ██╗  ████████╗██████╗ ██╗   ██╗ ██████╗██╗  ██╗███████╗██████╗ ',
+    '██║  ██║██╔════╝██║     ██║  ╚══██╔══╝██╔══██╗██║   ██║██╔════╝██║ ██╔╝██╔════╝██╔══██╗',
+    '███████║█████╗  ██║     ██║     ██║   ██████╔╝██║   ██║██║     █████╔╝ █████╗  ██████╔╝',
+    '██╔══██║██╔══╝  ██║     ██║     ██║   ██╔══██╗██║   ██║██║     ██╔═██╗ ██╔══╝  ██╔══██╗',
+    '██║  ██║███████╗███████╗███████╗██║   ██║  ██║╚██████╔╝╚██████╗██║  ██╗███████╗██║  ██║',
+    '╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝',
+]
+
 _HEADER_CACHE: Optional[Tuple[str, int]] = None
 
 
@@ -38,24 +48,13 @@ def _get_header() -> Tuple[str, int]:
     if _HEADER_CACHE is not None:
         return _HEADER_CACHE
 
-    try:
-        import pyfiglet
-        text = pyfiglet.figlet_format('HellTrucker', font='ansi_shadow', width=300)
-        lines_fig = text.rstrip('\n').split('\n')
-        while lines_fig and not lines_fig[0].strip():
-            lines_fig.pop(0)
-        while lines_fig and not lines_fig[-1].strip():
-            lines_fig.pop()
-    except Exception:
-        lines_fig = ['HellTrucker']
-
     subtitle = '-= NFO par HellTrucker =-'
-    inner_w = max(max(len(l) for l in lines_fig + [subtitle]), 55)
+    inner_w = max(max(len(l) for l in _FIGLET_LINES + [subtitle]), 55)
 
     rows = ['╔' + '═' * (inner_w + 2) + '╗']
     rows.append('║ ' + ' ' * inner_w + ' ║')
-    for ln in lines_fig:
-        rows.append('║ ' + ln[:inner_w].center(inner_w) + ' ║')
+    for ln in _FIGLET_LINES:
+        rows.append('║ ' + ln.ljust(inner_w) + ' ║')
     rows.append('║ ' + ' ' * inner_w + ' ║')
     rows.append('║ ' + subtitle.center(inner_w) + ' ║')
     rows.append('║ ' + ' ' * inner_w + ' ║')
