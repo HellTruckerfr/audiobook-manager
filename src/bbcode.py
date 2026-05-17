@@ -20,7 +20,10 @@ def _bitrate_display(info: AudioInfo) -> str:
 
 
 def _size_display(info: AudioInfo) -> str:
-    return f"{info.size_mb / 1024:.2f} GiB"
+    gib = info.size_mb / 1024
+    if gib >= 1:
+        return f"{gib:.2f} GiB"
+    return f"{info.size_mb:.0f} MiB"
 
 
 def _title_lines(cfg, fmt_label: str = "M4B",
